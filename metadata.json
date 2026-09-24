@@ -1,0 +1,6 @@
+{
+  "name": "PrivPrint",
+  "description": "Privacy-First Secure Xerox Platform with shop QR pairing, AES-256-GCM encrypted transfer, and atomic copy limits.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

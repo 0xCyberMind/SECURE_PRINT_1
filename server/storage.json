@@ -1,0 +1,79 @@
+{
+  "documents": [
+    {
+      "id": "DOC-989620E8371C",
+      "filename": "sample_nda.pdf",
+      "diskFilename": "doc-1790246880856-ea8e9e9c3b216cbc.pdf",
+      "filePath": "/app/applet/server/uploads/doc-1790246880856-ea8e9e9c3b216cbc.pdf",
+      "fileSize": 41,
+      "mimeType": "application/pdf",
+      "sha256": "bca689ad6e9256e64fd5a705fc991f9099b6f3e9033cd8f95c68055ec3877dba",
+      "encryptionAlgorithm": "AES-256-GCM",
+      "ivHex": "74e4ee055f3c4543ff202fc0",
+      "keyFingerprint": "FP-E78572217A5A5707",
+      "copiesAuthorized": 2,
+      "copiesPrinted": 2,
+      "downloadsRemaining": 0,
+      "createdAt": 1790246880864,
+      "expiresAt": 1790247780864,
+      "status": "COMPLETED",
+      "cleanupState": "CLEANUP_COMPLETED"
+    }
+  ],
+  "sessions": [],
+  "jobs": [],
+  "auditEvents": [
+    {
+      "id": "AUDIT-1B828886BA37",
+      "timestamp": 1790246892350,
+      "eventType": "COPY_LIMIT_ENFORCED",
+      "jobId": "DOC-989620E8371C",
+      "shopId": null,
+      "details": "Unauthorized extra download/copy blocked for document DOC-989620E8371C (Limit 2 reached).",
+      "severity": "SECURITY_ALERT"
+    },
+    {
+      "id": "AUDIT-65B29070A7C3",
+      "timestamp": 1790246888374,
+      "eventType": "STORAGE_SHREDDED",
+      "jobId": "DOC-989620E8371C",
+      "shopId": null,
+      "details": "Document 'sample_nda.pdf' securely overwritten and purged from disk after final authorized copy.",
+      "severity": "INFO"
+    },
+    {
+      "id": "AUDIT-F1C35247D869",
+      "timestamp": 1790246887870,
+      "eventType": "DOCUMENT_RETRIEVED",
+      "jobId": "DOC-989620E8371C",
+      "shopId": null,
+      "details": "Document 'sample_nda.pdf' spooled/downloaded (Copy 2 of 2).",
+      "severity": "INFO"
+    },
+    {
+      "id": "AUDIT-D063C9F07A57",
+      "timestamp": 1790246884283,
+      "eventType": "DOCUMENT_RETRIEVED",
+      "jobId": "DOC-989620E8371C",
+      "shopId": null,
+      "details": "Document 'sample_nda.pdf' spooled/downloaded (Copy 1 of 2).",
+      "severity": "INFO"
+    },
+    {
+      "id": "AUDIT-50E33537A44F",
+      "timestamp": 1790246880865,
+      "eventType": "DOCUMENT_UPLOADED",
+      "jobId": "DOC-989620E8371C",
+      "shopId": null,
+      "details": "Encrypted document 'sample_nda.pdf' uploaded (0.0 KB). Limit: 2 copy/copies. SHA256: bca689ad6e9256e6...",
+      "severity": "INFO"
+    },
+    {
+      "id": "AUDIT-INIT",
+      "timestamp": 1790246872970,
+      "eventType": "SYSTEM_BOOT",
+      "details": "PrivPrint Secure Backend Spooler & File Sharing Service online on port 3000.",
+      "severity": "INFO"
+    }
+  ]
+}
