@@ -1,0 +1,14 @@
+{
+  "server_base_url": "https://secure-print-1.onrender.com/",
+  "shop_id": "",
+  "device_name": "Windows Xerox Station Agent",
+  "device_id": null,
+  "api_key": null,
+  "access_token": null,
+  "refresh_token": null,
+  "auto_print_enabled": true,
+  "heartbeat_interval_sec": 15,
+  "reconnect_delay_sec": 5,
+  "dashboard_port": 8888,
+  "log_level": "INFO"
+}

@@ -12,6 +12,7 @@ import com.example.privprint.data.api.models.InitUploadResponse
 import com.example.privprint.data.api.models.JobResponse
 import com.example.privprint.data.api.models.LoginRequest
 import com.example.privprint.data.api.models.LoginResponse
+import com.example.privprint.data.api.models.RegisterRequest
 import com.example.privprint.data.api.models.NearbyShopDto
 import com.example.privprint.data.api.models.OtpRequestResponse
 import com.example.privprint.data.api.models.PhoneOtpRequest
@@ -22,6 +23,7 @@ import com.example.privprint.data.api.models.RefreshTokenRequest
 import com.example.privprint.data.api.models.RevokeSessionRequest
 import com.example.privprint.data.api.models.SessionResponse
 import com.example.privprint.data.api.models.ShopDto
+import com.example.privprint.data.api.models.ShopCreateRequest
 import com.example.privprint.data.api.models.TokenResponse
 import com.example.privprint.data.api.models.TokenRevocationRequest
 import okhttp3.RequestBody
@@ -48,6 +50,11 @@ interface PrivPrintApiService {
     @POST("api/v1/auth/login")
     suspend fun login(
         @Body request: LoginRequest
+    ): Response<LoginResponse>
+
+    @POST("api/v1/auth/register")
+    suspend fun register(
+        @Body request: RegisterRequest
     ): Response<LoginResponse>
 
     @POST("api/v1/auth/phone/request-otp")
@@ -84,6 +91,12 @@ interface PrivPrintApiService {
     // Shops
     @GET("api/v1/shops")
     suspend fun getShops(): Response<List<ShopDto>>
+
+    @POST("api/v1/shops")
+    suspend fun createShop(
+        @Header("Authorization") bearerToken: String,
+        @Body request: ShopCreateRequest
+    ): Response<ShopDto>
 
     @GET("api/v1/shops/nearby")
     suspend fun getNearbyShops(

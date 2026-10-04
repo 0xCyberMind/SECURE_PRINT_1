@@ -2,9 +2,9 @@ import os
 import json
 import logging
 from typing import Dict, Any
-from fastapi import FastAPI, Request
+from pydantic import BaseModel, Field
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from windows_agent.agent_service import WindowsAgentService
 
 logger = logging.getLogger("WindowsDashboard")
@@ -80,9 +80,39 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         input[type="text"], select { width: 100%; max-width: 480px; padding: 10px 14px; background-color: #0f172a; border: 1px solid var(--border-color); border-radius: 8px; color: #fff; font-size: 0.9rem; }
         .btn { padding: 10px 20px; background-color: var(--primary); color: #fff; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
         .btn:hover { background-color: var(--primary-dark); }
+        .auth-gate { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 24px; background: var(--bg-dark); }
+        .auth-card { width: min(100%, 480px); padding: 32px; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; }
+        .auth-card h1 { margin-bottom: 10px; color: #38bdf8; font-size: 1.4rem; }
+        .auth-card p { margin-bottom: 22px; color: var(--text-muted); line-height: 1.5; }
+        .auth-card input, .auth-card select { width: 100%; max-width: none; margin-bottom: 16px; }
+        .auth-card .btn { width: 100%; }
+        .auth-message { min-height: 22px; margin-top: 14px; color: #fca5a5; }
+        [hidden] { display: none !important; }
     </style>
 </head>
 <body>
+    <section id="auth-gate" class="auth-gate" hidden>
+        <div class="auth-card">
+            <h1>Set up your Xerox station</h1>
+            <p>Sign in with your shop-operator phone. This device will be securely registered to one of your shops.</p>
+            <div id="auth-phone-step">
+                <label for="operator-phone">Operator phone (include country code)</label>
+                <input id="operator-phone" type="tel" autocomplete="tel" placeholder="+91..." maxlength="32">
+                <button id="request-otp-button" class="btn" onclick="requestOperatorOtp()">Send verification code</button>
+            </div>
+            <div id="auth-otp-step" hidden>
+                <label for="operator-otp">6-digit verification code</label>
+                <input id="operator-otp" type="password" inputmode="numeric" autocomplete="one-time-code" maxlength="6">
+                <button id="verify-otp-button" class="btn" onclick="verifyOperatorOtp()">Verify code</button>
+            </div>
+            <div id="auth-shop-step" hidden>
+                <label for="operator-shop">Choose your shop</label>
+                <select id="operator-shop"></select>
+                <button id="connect-shop-button" class="btn" onclick="connectStation()">Connect this station</button>
+            </div>
+            <div id="auth-message" class="auth-message" role="alert"></div>
+        </div>
+    </section>
     <div class="sidebar">
         <div class="sidebar-header">
             <h2>🖨️ PRIVPRINT</h2>
@@ -103,7 +133,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <h3 id="page-title">Station Overview</h3>
             <div class="status-badge">
                 <div class="status-dot"></div>
-                <span id="conn-state">WSS Connected</span>
+                <span id="conn-state">Not connected</span>
             </div>
         </div>
 
@@ -174,8 +204,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <div id="cloud" class="tab-content">
                 <div class="metric-card" style="margin-bottom: 20px;">
                     <h4 style="margin-bottom: 12px; color: #38bdf8;">Cloud Connection & WSS Stream</h4>
-                    <p style="margin-bottom: 6px;"><strong>Endpoint:</strong> <span id="c-endpoint">https://ais-dev-6u62dc37mqabbjyehi6umo-408539472511.asia-southeast1.run.app/</span></p>
-                    <p style="margin-bottom: 6px;"><strong>Device ID:</strong> <span id="c-device-id">dev_win_e8f9901</span></p>
+                    <p style="margin-bottom: 6px;"><strong>Endpoint:</strong> <span id="c-endpoint"></span></p>
+                    <p style="margin-bottom: 6px;"><strong>Device ID:</strong> <span id="c-device-id">Not registered</span></p>
                     <p style="margin-bottom: 6px;"><strong>Role:</strong> PRINT_DEVICE</p>
                     <p style="margin-bottom: 6px;"><strong>WSS Channel:</strong> <span id="c-channel">shop:SHOP-101</span></p>
                     <p><strong>Heartbeat Interval:</strong> 15 seconds</p>
@@ -214,17 +244,16 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <h4 style="margin-bottom: 20px;">Station Configuration</h4>
                     <div class="form-group">
                         <label>PrivPrint Server Base URL</label>
-                        <input type="text" id="s-server-url" value="https://ais-dev-6u62dc37mqabbjyehi6umo-408539472511.asia-southeast1.run.app/">
+                        <input type="text" id="s-server-url" value="https://secure-print-1.onrender.com/" readonly>
                     </div>
                     <div class="form-group">
                         <label>Assigned Xerox Shop ID</label>
-                        <input type="text" id="s-shop-id" value="SHOP-101">
+                        <input type="text" id="s-shop-id" value="" readonly>
                     </div>
                     <div class="form-group">
                         <label>Station Device Name</label>
-                        <input type="text" id="s-device-name" value="Windows Xerox Station Agent">
+                        <input type="text" id="s-device-name" value="Windows Xerox Station Agent" readonly>
                     </div>
-                    <button class="btn" onclick="saveSettings()">Save Configuration</button>
                 </div>
             </div>
         </div>
@@ -239,16 +268,94 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             document.getElementById('page-title').innerText = el.innerText;
         }
 
+        async function apiPost(path, payload) {
+            const response = await fetch(path, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.detail || 'Request failed. Please try again.');
+            return data;
+        }
+
+        function showAuthError(message) {
+            document.getElementById('auth-message').innerText = message;
+        }
+
+        async function requestOperatorOtp() {
+            const button = document.getElementById('request-otp-button');
+            button.disabled = true;
+            showAuthError('');
+            try {
+                await apiPost('/api/auth/request-otp', {phone_number: document.getElementById('operator-phone').value});
+                document.getElementById('auth-otp-step').hidden = false;
+                document.getElementById('operator-otp').focus();
+                showAuthError('Code requested. Check your phone.');
+            } catch (error) {
+                showAuthError(error.message);
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        async function verifyOperatorOtp() {
+            const button = document.getElementById('verify-otp-button');
+            button.disabled = true;
+            showAuthError('');
+            try {
+                const result = await apiPost('/api/auth/verify-otp', {
+                    phone_number: document.getElementById('operator-phone').value,
+                    otp: document.getElementById('operator-otp').value
+                });
+                const selector = document.getElementById('operator-shop');
+                selector.replaceChildren();
+                for (const shop of result.shops) {
+                    const option = document.createElement('option');
+                    option.value = shop.id;
+                    option.textContent = shop.name;
+                    selector.appendChild(option);
+                }
+                document.getElementById('auth-shop-step').hidden = false;
+                showAuthError('');
+            } catch (error) {
+                showAuthError(error.message);
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        async function connectStation() {
+            const button = document.getElementById('connect-shop-button');
+            button.disabled = true;
+            showAuthError('');
+            try {
+                await apiPost('/api/auth/connect', {shop_id: document.getElementById('operator-shop').value});
+                document.getElementById('auth-gate').hidden = true;
+                await fetchStatus();
+            } catch (error) {
+                showAuthError(error.message);
+            } finally {
+                button.disabled = false;
+            }
+        }
+
         async function fetchStatus() {
             try {
                 const res = await fetch('/api/status');
                 const data = await res.json();
+                document.getElementById('auth-gate').hidden = Boolean(data.authenticated);
+                if (!data.authenticated) return;
 
                 document.getElementById('m-shop-id').innerText = data.shop_id || 'SHOP-101';
                 document.getElementById('m-printers-count').innerText = data.printers.length;
                 document.getElementById('m-queue-count').innerText = Object.keys(data.active_jobs).length;
                 document.getElementById('m-completed-count').innerText = data.job_history.length;
                 document.getElementById('conn-state').innerText = data.is_wss_connected ? 'WSS Connected' : 'Disconnected';
+                document.getElementById('c-endpoint').innerText = data.server_base_url;
+                document.getElementById('c-device-id').innerText = data.device_id || 'Not registered';
+                document.getElementById('s-server-url').value = data.server_base_url;
+                document.getElementById('s-shop-id').value = data.shop_id || '';
 
                 // Render printers
                 const pRows = data.printers.map(p => `
@@ -285,11 +392,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 `).join('');
                 document.getElementById('audit-table-body').innerHTML = aRows.length ? aRows : '<tr><td colspan="3" style="text-align:center;">No audit events.</td></tr>';
 
-            } catch(e) {}
-        }
-
-        function saveSettings() {
-            alert('Settings saved successfully!');
+            } catch(e) {
+                document.getElementById('auth-gate').hidden = false;
+                showAuthError('Cannot connect to the local station service. Restart the Windows station app.');
+            }
         }
 
         setInterval(fetchStatus, 3000);
@@ -310,7 +416,9 @@ async def get_status_api():
 
     printers = agent_service.spooler.discover_local_printers()
     return JSONResponse({
+        "authenticated": bool(agent_service.config.access_token and agent_service.config.shop_id),
         "shop_id": agent_service.config.shop_id,
+        "server_base_url": agent_service.config.server_base_url,
         "device_id": agent_service.config.device_id,
         "is_wss_connected": agent_service.realtime_client.is_connected,
         "printers": printers,
@@ -318,3 +426,48 @@ async def get_status_api():
         "job_history": agent_service.job_history,
         "audit_log": agent_service.audit_log
     })
+
+
+class OperatorPhoneRequest(BaseModel):
+    phone_number: str = Field(..., min_length=7, max_length=32)
+
+
+class OperatorOtpVerifyRequest(OperatorPhoneRequest):
+    otp: str = Field(..., min_length=6, max_length=6)
+
+
+class ConnectShopRequest(BaseModel):
+    shop_id: str = Field(..., min_length=1, max_length=64)
+
+
+@dashboard_app.post("/api/auth/request-otp")
+async def request_operator_otp(payload: OperatorPhoneRequest):
+    if not agent_service:
+        raise HTTPException(status_code=503, detail="Windows station service is starting.")
+    try:
+        await agent_service.request_operator_otp(payload.phone_number)
+        return {"status": "sent"}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@dashboard_app.post("/api/auth/verify-otp")
+async def verify_operator_otp(payload: OperatorOtpVerifyRequest):
+    if not agent_service:
+        raise HTTPException(status_code=503, detail="Windows station service is starting.")
+    try:
+        shops = await agent_service.verify_operator_otp(payload.phone_number, payload.otp)
+        return {"shops": shops}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@dashboard_app.post("/api/auth/connect")
+async def connect_operator_shop(payload: ConnectShopRequest):
+    if not agent_service:
+        raise HTTPException(status_code=503, detail="Windows station service is starting.")
+    try:
+        await agent_service.connect_operator_shop(payload.shop_id)
+        return {"status": "connected"}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

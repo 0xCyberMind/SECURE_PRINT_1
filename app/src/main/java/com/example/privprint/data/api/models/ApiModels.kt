@@ -55,6 +55,19 @@ data class LoginRequest(
     val password: String
 )
 
+data class RegisterRequest(
+    val email: String,
+    val password: String,
+    @Json(name = "full_name") val fullName: String,
+    @Json(name = "phone_number") val phoneNumber: String? = null,
+    val role: UserRole = UserRole.USER
+)
+
+data class ShopCreateRequest(
+    val name: String,
+    val address: String
+)
+
 data class LoginResponse(
     @Json(name = "access_token") val accessToken: String,
     @Json(name = "refresh_token") val refreshToken: String,

@@ -36,4 +36,6 @@ debug.keystore
 /test_otp.json
 /app_build_testresults_dump.txt
 /hs_err_pid*.log
+/windows_agent/build/
+/windows_agent/dist/
 *.log

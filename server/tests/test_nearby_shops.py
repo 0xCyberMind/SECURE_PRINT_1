@@ -1,15 +1,21 @@
 import pytest
 from fastapi.testclient import TestClient
+from app.core.security import create_access_token, get_password_hash
+from app.models.enums import UserRole
+from app.repositories.user_repo import UserRepository
 
 
-def test_nearby_and_distant_shops_discovery(client: TestClient):
-    # Setup Shop Operator
-    op = client.post("/api/v1/auth/register", json={
-        "email": "nearby_op@example.com",
-        "password": "Password123!",
-        "role": "SHOP_OPERATOR"
-    }).json()
-    token = op["access_token"]
+@pytest.mark.asyncio
+async def test_nearby_and_distant_shops_discovery(client: TestClient, db_session):
+    admin = await UserRepository(db_session).create(
+        email="nearby_admin@example.com",
+        hashed_password=get_password_hash("Password123!"),
+        role=UserRole.ADMIN.value,
+        is_active=True,
+        is_verified=True,
+    )
+    await db_session.commit()
+    token = create_access_token(subject=admin.id, role=admin.role)
 
     # 1. Create a Nearby Shop (approx. 0.4 km away from 23.0225, 72.5714)
     nearby_res = client.post(

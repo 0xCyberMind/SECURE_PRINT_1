@@ -152,13 +152,14 @@ def test_role_based_authorization_restrictions(client: TestClient):
     }).json()
     op_token = op_res["access_token"]
 
-    # 3. ADMIN
+    # Public registration must never grant the ADMIN role.
     admin_res = client.post("/api/v1/auth/register", json={
         "email": "admin_user@example.com",
         "password": "Password123!",
         "role": "ADMIN"
-    }).json()
-    admin_token = admin_res["access_token"]
+    })
+    assert admin_res.status_code == 403
+    assert admin_res.json()["error"]["code"] == "FORBIDDEN"
 
     # USER calls /admin-only -> 403 FORBIDDEN
     res_user_admin = client.get("/api/v1/auth/admin-only", headers={"Authorization": f"Bearer {user_token}"})
@@ -178,13 +179,8 @@ def test_role_based_authorization_restrictions(client: TestClient):
     res_op_admin = client.get("/api/v1/auth/admin-only", headers={"Authorization": f"Bearer {op_token}"})
     assert res_op_admin.status_code == 403
 
-    # ADMIN calls /admin-only -> 200 OK
-    res_admin = client.get("/api/v1/auth/admin-only", headers={"Authorization": f"Bearer {admin_token}"})
-    assert res_admin.status_code == 200
-
-    # ADMIN calls /operator-only -> 200 OK (Superuser bypass)
-    res_admin_op = client.get("/api/v1/auth/operator-only", headers={"Authorization": f"Bearer {admin_token}"})
-    assert res_admin_op.status_code == 200
+    # The rejected registration response contains no administrator access token.
+    assert "access_token" not in admin_res.json()
 
 
 @pytest.mark.asyncio

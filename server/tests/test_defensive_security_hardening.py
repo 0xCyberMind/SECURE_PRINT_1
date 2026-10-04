@@ -43,7 +43,11 @@ def test_standardized_error_format_no_stack_trace_leakage(client: TestClient):
     assert res.headers.get("X-Request-ID") is not None
 
 
-def test_cross_tenant_idor_prevention(client: TestClient):
+@pytest.mark.asyncio
+async def test_cross_tenant_idor_prevention(
+    client: TestClient,
+    admin_headers,
+):
     """
     Test 3: Strict IDOR & Tenant Boundary Protection.
     User A cannot view, modify, or authorize User B's print jobs or documents.
@@ -66,6 +70,12 @@ def test_cross_tenant_idor_prevention(client: TestClient):
     shop = client.post("/api/v1/shops", json={
         "name": "Defensive Security Shop", "address": "123 Defense Lane"
     }, headers={"Authorization": f"Bearer {op['access_token']}"}).json()
+
+    approval = client.post(
+        f"/api/v1/shops/{shop['id']}/approve",
+        headers=admin_headers,
+    )
+    assert approval.status_code == 200, approval.text
 
     # User A creates session and document
     sess_a = client.post("/api/v1/sessions", json={"shop_id": shop["id"]}, headers=auth_a).json()

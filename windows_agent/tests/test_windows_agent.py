@@ -1,10 +1,13 @@
 import os
+import json
 import pytest
 import asyncio
+from unittest.mock import AsyncMock
 from windows_agent.config import AgentConfig
 from windows_agent.secure_store import SecureCredentialStore
 from windows_agent.printer_spooler import PrinterSpoolerManager
 from windows_agent.agent_service import WindowsAgentService
+from windows_agent.realtime_client import WindowsAgentRealtimeClient, ConnectionState
 from windows_agent.dashboard import dashboard_app, init_dashboard
 from fastapi.testclient import TestClient
 
@@ -27,6 +30,28 @@ def test_config_load_and_save(tmp_path):
     loaded = AgentConfig.load(config_path)
     assert loaded.server_base_url == "https://test.com"
     assert loaded.shop_id == "SHOP-TEST"
+    stored_config = json.loads(open(config_path, encoding="utf-8").read())
+    assert not {"api_key", "access_token", "refresh_token", "device_id"}.intersection(stored_config)
+
+
+def test_station_config_defaults_to_render_without_assuming_shop():
+    config = AgentConfig()
+    assert config.server_base_url == "https://secure-print-1.onrender.com/"
+    assert config.shop_id == ""
+
+
+def test_realtime_url_never_puts_access_token_in_query():
+    config = AgentConfig(access_token="test-access-token")
+    client = WindowsAgentRealtimeClient(config)
+    assert client._get_ws_url() == "wss://secure-print-1.onrender.com/api/v1/realtime/ws"
+    assert "test-access-token" not in client._get_ws_url()
+
+
+@pytest.mark.asyncio
+async def test_realtime_does_not_connect_without_station_credentials():
+    client = WindowsAgentRealtimeClient(AgentConfig())
+    await client.start()
+    assert client.state == ConnectionState.ERROR
 
 def test_secure_credential_store(tmp_path):
     store_path = str(tmp_path / "sec.dat")
@@ -159,4 +184,34 @@ def test_dashboard_api_status(agent_config):
     assert data["shop_id"] == "SHOP-101"
     assert "printers" in data
     assert "audit_log" in data
+    assert data["authenticated"] is False
+    assert data["server_base_url"] == agent_config.server_base_url
 
+
+def test_dashboard_operator_otp_setup_routes(agent_config, monkeypatch):
+    service = WindowsAgentService(agent_config)
+    service.request_operator_otp = AsyncMock()
+    service.verify_operator_otp = AsyncMock(return_value=[
+        {"id": "shop-test", "name": "Test Xerox Shop"}
+    ])
+    service.connect_operator_shop = AsyncMock()
+    init_dashboard(service)
+
+    client = TestClient(dashboard_app)
+    requested = client.post(
+        "/api/auth/request-otp",
+        json={"phone_number": "+919876543210"},
+    )
+    assert requested.status_code == 200
+    service.request_operator_otp.assert_awaited_once_with("+919876543210")
+
+    verified = client.post(
+        "/api/auth/verify-otp",
+        json={"phone_number": "+919876543210", "otp": "123456"},
+    )
+    assert verified.status_code == 200
+    assert verified.json()["shops"] == [{"id": "shop-test", "name": "Test Xerox Shop"}]
+
+    connected = client.post("/api/auth/connect", json={"shop_id": "shop-test"})
+    assert connected.status_code == 200
+    service.connect_operator_shop.assert_awaited_once_with("shop-test")

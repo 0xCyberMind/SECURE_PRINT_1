@@ -76,10 +76,24 @@ async def request_phone_otp(
         try:
             await twilio_verify.start_verification(phone)
         except twilio_verify.TwilioVerifyError as exc:
+            provider_reason = "SMS verification is temporarily unavailable"
+            if exc.status_code == 403:
+                provider_reason = "SMS verification was rejected by the provider"
+            elif exc.status_code == 429:
+                provider_reason = "SMS verification rate limit reached; wait before requesting another code"
+            elif exc.status_code is not None:
+                provider_reason = f"SMS verification provider returned HTTP {exc.status_code}"
+            if exc.provider_code is not None:
+                provider_reason += f" (Twilio error {exc.provider_code})"
             raise PrivPrintException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 code=ErrorCode.NETWORK_ERROR,
-                message="SMS verification is temporarily unavailable",
+                message=provider_reason,
+                details={
+                    "provider": "twilio",
+                    "http_status": exc.status_code,
+                    "provider_code": exc.provider_code,
+                },
             ) from exc
         await client.set(
             f"otp:phone:{phone}",
@@ -208,6 +222,9 @@ async def verify_phone_otp(
                 owner_id=user.id,
                 address="Address pending registration",
                 permanent_qr_payload=f"privprint://shop?id={shop_id}",
+                status="PENDING_APPROVAL",
+                is_verified=False,
+                is_online=False,
             )
             db.add(shop)
             await db.flush()  # Ensure shop is created before proceeding
@@ -257,7 +274,13 @@ async def register(
             message=f"User with email {payload.email} already exists"
         )
 
-    # Sanitize role: public registration defaults to USER unless explicitly permitted
+    if payload.role not in (None, UserRole.USER, UserRole.SHOP_OPERATOR):
+        raise PrivPrintException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code=ErrorCode.FORBIDDEN,
+            message="This role cannot be created through public registration",
+        )
+
     assigned_role = payload.role if payload.role else UserRole.USER
 
     hashed_pw = get_password_hash(payload.password)

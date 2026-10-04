@@ -57,8 +57,7 @@ class WindowsAgentRealtimeClient:
 
     def _get_ws_url(self) -> str:
         base = self.config.server_base_url.replace("http://", "ws://").replace("https://", "wss://").rstrip("/")
-        token = self.config.access_token or ""
-        return f"{base}/api/v1/realtime/ws?token={token}"
+        return f"{base}/api/v1/realtime/ws"
 
     def _calculate_backoff_delay(self) -> float:
         # Exponential backoff with jitter: base * 2^min(attempt, 5) + rand(0, 1)
@@ -91,13 +90,17 @@ class WindowsAgentRealtimeClient:
             try:
                 self.state = ConnectionState.CONNECTING if self.reconnect_attempts == 0 else ConnectionState.RECONNECTING
                 ws_url = self._get_ws_url()
-                logger.info(f"Connecting outbound WSS to {ws_url} (Attempt {self.reconnect_attempts})...")
+                if not self.config.access_token:
+                    self.state = ConnectionState.ERROR
+                    logger.warning("Realtime connection paused: station is not authenticated.")
+                    return
 
                 # Note: imports websockets dynamically or handles mock/test environment gracefully
                 import websockets
 
                 async with websockets.connect(
                     ws_url,
+                    additional_headers={"Authorization": f"Bearer {self.config.access_token}"},
                     ping_interval=20,
                     ping_timeout=10,
                     close_timeout=5
@@ -141,7 +144,7 @@ class WindowsAgentRealtimeClient:
                 self.reconnect_attempts += 1
                 delay = self._calculate_backoff_delay()
                 logger.warning(
-                    f"Outbound WSS disconnected ({e}). Reconnecting in {delay:.2f}s "
+                    f"Outbound WSS disconnected ({type(e).__name__}). Reconnecting in {delay:.2f}s "
                     f"(Attempt {self.reconnect_attempts})..."
                 )
                 if self.is_running:

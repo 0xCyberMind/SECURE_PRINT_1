@@ -20,6 +20,9 @@ from app.models.entities import (
     User, Shop, Device, Printer, Session, Document, PrintJob, RefreshToken, AuditLog
 )
 from app.services.redis_service import get_redis_service
+from app.core.security import create_access_token, get_password_hash
+from app.models.enums import UserRole
+from app.repositories.user_repo import UserRepository
 
 TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 
@@ -74,3 +77,17 @@ def client() -> TestClient:
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
     async with TestAsyncSessionLocal() as session:
         yield session
+
+
+@pytest_asyncio.fixture
+async def admin_headers(db_session: AsyncSession) -> dict[str, str]:
+    admin = await UserRepository(db_session).create(
+        email="test_admin@example.com",
+        hashed_password=get_password_hash("AdminPassword123!"),
+        role=UserRole.ADMIN.value,
+        is_active=True,
+        is_verified=True,
+    )
+    await db_session.commit()
+    token = create_access_token(subject=admin.id, role=admin.role)
+    return {"Authorization": f"Bearer {token}"}

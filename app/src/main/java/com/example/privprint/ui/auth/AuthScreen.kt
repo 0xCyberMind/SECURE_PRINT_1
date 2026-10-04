@@ -72,16 +72,23 @@ fun AuthScreen(
     initialTab: Int = 0,
     canCancel: Boolean = false,
     onCancel: () -> Unit = {},
-    onLoginUser: (name: String, phone: String) -> Boolean,
-    onVerifyUserOtp: (code: String) -> Boolean,
-    onResetUserOtp: () -> Unit,
-    onLoginShop: (shopName: String, operatorName: String, operatorPhone: String) -> Boolean,
-    onVerifyShopOtp: (code: String) -> Boolean,
-    onResetShopOtp: () -> Unit,
+    onAuthenticateUser: (
+        email: String,
+        password: String,
+        fullName: String,
+        phone: String,
+        register: Boolean
+    ) -> Boolean,
+    onAuthenticateShop: (
+        shopName: String,
+        operatorName: String,
+        email: String,
+        password: String,
+        phone: String,
+        register: Boolean
+    ) -> Boolean,
     loginInProgress: Boolean = false,
     loginError: String? = null,
-    userOtpRequested: Boolean = false,
-    shopOtpRequested: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     // 0 = Customer Login, 1 = Xerox Shop Operator Login
@@ -189,13 +196,10 @@ fun AuthScreen(
                 enter = fadeIn(),
                 exit = fadeOut()
             ) {
-                CustomerLoginForm(
-                    onLogin = onLoginUser,
-                    onVerifyOtp = onVerifyUserOtp,
-                    onResetOtp = onResetUserOtp,
+                CustomerPasswordAuthForm(
+                    onAuthenticate = onAuthenticateUser,
                     loginInProgress = loginInProgress,
                     loginError = loginError,
-                    otpRequested = userOtpRequested,
                     onSwitchToShop = { selectedTab = 1 }
                 )
             }
@@ -205,13 +209,10 @@ fun AuthScreen(
                 enter = fadeIn(),
                 exit = fadeOut()
             ) {
-                ShopOperatorLoginForm(
-                    onLogin = onLoginShop,
-                    onVerifyOtp = onVerifyShopOtp,
-                    onResetOtp = onResetShopOtp,
+                ShopPasswordAuthForm(
+                    onAuthenticate = onAuthenticateShop,
                     loginInProgress = loginInProgress,
                     loginError = loginError,
-                    otpRequested = shopOtpRequested,
                     onSwitchToCustomer = { selectedTab = 0 }
                 )
             }

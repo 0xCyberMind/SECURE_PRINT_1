@@ -1,17 +1,30 @@
 import os
 import json
+import sys
 from dataclasses import dataclass, field
 from typing import Optional
 
-CONFIG_FILE_PATH = os.path.join(os.path.dirname(__file__), "shop_station_config.json")
 
-PROD_SERVER_BASE_URL = "https://api.privprint.com/"
+def _config_directory() -> str:
+    if getattr(sys, "frozen", False):
+        base_dir = os.path.join(
+            os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
+            "PrivPrintStation",
+        )
+        os.makedirs(base_dir, exist_ok=True)
+        return base_dir
+    return os.path.dirname(__file__)
+
+
+CONFIG_FILE_PATH = os.path.join(_config_directory(), "shop_station_config.json")
+
+PROD_SERVER_BASE_URL = "https://secure-print-1.onrender.com/"
 DEV_SERVER_BASE_URL = "https://ais-dev-6u62dc37mqabbjyehi6umo-408539472511.asia-southeast1.run.app/"
 
 @dataclass
 class AgentConfig:
-    server_base_url: str = DEV_SERVER_BASE_URL
-    shop_id: str = "SHOP-101"
+    server_base_url: str = PROD_SERVER_BASE_URL
+    shop_id: str = ""
     device_name: str = "Windows Xerox Station Agent"
     device_id: Optional[str] = None
     api_key: Optional[str] = None
@@ -39,10 +52,6 @@ class AgentConfig:
             "server_base_url": self.server_base_url,
             "shop_id": self.shop_id,
             "device_name": self.device_name,
-            "device_id": self.device_id,
-            "api_key": self.api_key,
-            "access_token": self.access_token,
-            "refresh_token": self.refresh_token,
             "auto_print_enabled": self.auto_print_enabled,
             "heartbeat_interval_sec": self.heartbeat_interval_sec,
             "reconnect_delay_sec": self.reconnect_delay_sec,

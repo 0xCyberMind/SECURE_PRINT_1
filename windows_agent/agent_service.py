@@ -46,6 +46,9 @@ class WindowsAgentService:
             on_reconnect_callback=self.reconcile_on_reconnect
         )
         self.is_running = False
+        self._background_tasks_started = False
+        self._operator_token: Optional[str] = None
+        self._pending_operator_shops: Dict[str, str] = {}
         self.active_jobs: Dict[str, Dict[str, Any]] = {}
         self.job_history: List[Dict[str, Any]] = []
         self.audit_log: List[Dict[str, Any]] = []
@@ -71,9 +74,10 @@ class WindowsAgentService:
             self.config.api_key = creds.get("api_key")
             self.config.access_token = creds.get("access_token")
             self.config.refresh_token = creds.get("refresh_token")
+            self.config.shop_id = creds.get("shop_id") or self.config.shop_id
             self.api_client.access_token = self.config.access_token
             self.api_client.refresh_token = self.config.refresh_token
-            self.log_audit("CREDENTIALS_RESTORED", f"Device credentials restored for device: {self.config.device_id}")
+            self.log_audit("CREDENTIALS_RESTORED", "Windows station credentials restored")
 
         self.log_audit("SYSTEM_INIT", "Windows Shop Station Agent Initialized")
 
@@ -94,11 +98,16 @@ class WindowsAgentService:
                     device_id=reg_info.get("device_id"),
                     api_key=reg_info.get("api_key")
                 )
+                self.config.device_id = reg_info.get("device_id")
+                self.config.api_key = reg_info.get("api_key")
+                self.config.access_token = auth_info.get("accessToken") or auth_info.get("access_token")
+                self.config.refresh_token = auth_info.get("refreshToken") or auth_info.get("refresh_token")
                 self.secure_store.store_credentials(
-                    device_id=reg_info.get("device_id"),
-                    api_key=reg_info.get("api_key"),
-                    access_token=auth_info.get("accessToken"),
-                    refresh_token=auth_info.get("refreshToken")
+                    device_id=self.config.device_id,
+                    api_key=self.config.api_key,
+                    access_token=self.config.access_token,
+                    refresh_token=self.config.refresh_token,
+                    shop_id=self.config.shop_id,
                 )
                 self.log_audit("DEVICE_AUTHENTICATED", f"Authenticated as PRINT_DEVICE: {self.config.device_id}")
             except Exception as e:
@@ -112,8 +121,10 @@ class WindowsAgentService:
                         device_id=self.config.device_id,
                         api_key=self.config.api_key,
                         access_token=auth_info.get("accessToken"),
-                        refresh_token=auth_info.get("refreshToken")
+                        refresh_token=auth_info.get("refreshToken"),
+                        shop_id=self.config.shop_id,
                     )
+                    self.config.save()
                     self.log_audit("TOKEN_REFRESHED", "Successfully refreshed JWT access token")
             except Exception as e:
                 logger.debug(f"Token refresh check: {e}")
@@ -128,6 +139,82 @@ class WindowsAgentService:
                 self.log_audit("PRINTERS_DISCOVERED", f"Discovered {len(printers)} local Windows spooler printers")
         except Exception as e:
             self.log_audit("PRINTER_SYNC_WARN", f"Local printer discovery sync note: {e}", severity="WARNING")
+
+    async def request_operator_otp(self, phone_number: str) -> None:
+        await self.api_client.request_operator_otp(phone_number.strip())
+
+    async def verify_operator_otp(self, phone_number: str, otp: str) -> List[Dict[str, str]]:
+        token_response = await self.api_client.verify_operator_otp(
+            phone_number.strip(),
+            otp.strip(),
+        )
+        operator_token = token_response.get("access_token")
+        if not operator_token:
+            raise RuntimeError("Server response did not include an operator access token.")
+
+        shops = await self.api_client.list_operator_shops(operator_token)
+        self._operator_token = operator_token
+        self._pending_operator_shops = {
+            str(shop["id"]): str(shop.get("name") or "Xerox shop")
+            for shop in shops
+            if shop.get("id")
+        }
+        if not self._pending_operator_shops:
+            self._operator_token = None
+            raise RuntimeError("No shop is linked to this operator account.")
+        return [
+            {"id": shop_id, "name": name}
+            for shop_id, name in self._pending_operator_shops.items()
+        ]
+
+    async def connect_operator_shop(self, shop_id: str) -> None:
+        if not self._operator_token or shop_id not in self._pending_operator_shops:
+            raise RuntimeError("Please verify the shop operator OTP and select one of their shops.")
+
+        self.config.shop_id = shop_id
+        registration = await self.api_client.register_device(
+            shop_id=shop_id,
+            device_name=self.config.device_name,
+            operator_token=self._operator_token,
+        )
+        device_id = registration.get("device_id")
+        api_key = registration.get("api_key")
+        if not device_id or not api_key:
+            raise RuntimeError("Server did not return valid station device credentials.")
+
+        auth = await self.api_client.authenticate_device(device_id, api_key)
+        access_token = auth.get("access_token") or auth.get("accessToken")
+        refresh_token = auth.get("refresh_token") or auth.get("refreshToken")
+        if not access_token or not refresh_token:
+            raise RuntimeError("Server did not return valid station authentication tokens.")
+
+        self.config.device_id = device_id
+        self.config.api_key = api_key
+        self.config.access_token = access_token
+        self.config.refresh_token = refresh_token
+        self.api_client.access_token = access_token
+        self.api_client.refresh_token = refresh_token
+        self.secure_store.store_credentials(
+            device_id=device_id,
+            api_key=api_key,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            shop_id=shop_id,
+        )
+        self.config.save()
+        self._operator_token = None
+        self._pending_operator_shops.clear()
+        await self._start_authenticated_tasks()
+
+    async def _start_authenticated_tasks(self) -> None:
+        self.is_running = True
+        await self.reconcile_on_reconnect()
+        if self._background_tasks_started:
+            return
+        self._background_tasks_started = True
+        asyncio.create_task(self._heartbeat_rest_loop())
+        asyncio.create_task(self.poll_queue_loop())
+        asyncio.create_task(self.realtime_client.start())
 
     async def reconcile_on_reconnect(self):
         """
@@ -367,11 +454,8 @@ class WindowsAgentService:
     async def start(self):
         self.is_running = True
         await self.initialize()
-        await self.reconcile_on_reconnect()
-
-        asyncio.create_task(self._heartbeat_rest_loop())
-        asyncio.create_task(self.poll_queue_loop())
-        asyncio.create_task(self.realtime_client.start())
+        if self.config.access_token and self.config.shop_id:
+            await self._start_authenticated_tasks()
 
     def stop(self):
         self.is_running = False

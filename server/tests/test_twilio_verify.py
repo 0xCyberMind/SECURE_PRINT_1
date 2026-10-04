@@ -69,3 +69,21 @@ async def test_check_verification_rejects_invalid_code(twilio_settings):
     StubAsyncClient.response_body = {"code": 20404}
 
     assert not await twilio_verify.check_verification("+919876543210", "000000")
+
+
+@pytest.mark.asyncio
+async def test_start_verification_preserves_safe_provider_error_metadata(twilio_settings):
+    StubAsyncClient.status_code = 403
+    StubAsyncClient.response_body = {
+        "code": 60200,
+        "message": "Provider rejected request",
+        "phone_number": "+919876543210",
+    }
+
+    with pytest.raises(twilio_verify.TwilioVerifyError) as error:
+        await twilio_verify.start_verification("+919876543210")
+
+    assert error.value.status_code == 403
+    assert error.value.provider_code == 60200
+    assert str(error.value) == "Provider rejected request"
+    assert "+919876543210" not in str(error.value)

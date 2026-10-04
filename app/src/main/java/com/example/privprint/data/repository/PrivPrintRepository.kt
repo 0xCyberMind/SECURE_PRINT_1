@@ -1,6 +1,5 @@
 package com.example.privprint.data.repository
 
-import com.example.BuildConfig
 import com.example.privprint.data.api.ApiClient
 import com.example.privprint.data.api.models.CleanupStatusDto
 import com.example.privprint.data.api.models.CompleteUploadRequest
@@ -8,6 +7,8 @@ import com.example.privprint.data.api.models.CreateJobRequest
 import com.example.privprint.data.api.models.CreateSessionRequest
 import com.example.privprint.data.api.models.InitUploadRequest
 import com.example.privprint.data.api.models.LoginRequest
+import com.example.privprint.data.api.models.RegisterRequest
+import com.example.privprint.data.api.models.ShopCreateRequest
 import com.example.privprint.data.api.models.PhoneOtpRequest
 import com.example.privprint.data.api.models.PhoneOtpVerifyRequest
 import com.example.privprint.data.api.models.OtpRequestResponse
@@ -110,7 +111,14 @@ class PrivPrintRepository(
             }
 
             val body = response.body()!!
-            val user = AuthenticatedUser(body.user.id, body.user.role, shopId)
+            val user = AuthenticatedUser(
+                body.user.id,
+                body.user.role,
+                shopId,
+                fullName = body.user.fullName,
+                email = body.user.email,
+                phoneNumber = body.user.phoneNumber
+            )
             authTokenManager.saveAuth(user, body.accessToken, body.refreshToken)
             realtimeClient.connect("user:${body.user.id}", body.accessToken)
             AuthResult.Success(user, body.accessToken, body.refreshToken)
@@ -268,33 +276,206 @@ class PrivPrintRepository(
     /**
      * Authenticates a user or shop operator via real API endpoint `/api/v1/auth/login`.
      */
-    suspend fun login(identity: String, secret: String, role: UserRole, shopId: String? = null): AuthResult {
+    suspend fun login(
+        identity: String,
+        secret: String,
+        role: UserRole,
+        shopName: String? = null
+    ): AuthResult {
         return try {
             val response = ApiClient.apiService.login(LoginRequest(email = identity, password = secret))
             if (response.isSuccessful && response.body() != null) {
                 val body = response.body()!!
+                if (body.user.role != role) {
+                    return AuthResult.Failure(
+                        if (role == UserRole.SHOP_OPERATOR) {
+                            "This account is not registered as a Xerox shop operator."
+                        } else {
+                            "This account is not registered as a customer."
+                        },
+                        "ROLE_MISMATCH"
+                    )
+                }
+
+                val authenticatedUser = AuthenticatedUser(
+                    userId = body.user.id,
+                    role = body.user.role,
+                    fullName = body.user.fullName,
+                    email = body.user.email,
+                    phoneNumber = body.user.phoneNumber
+                )
+                authTokenManager.saveAuth(authenticatedUser, body.accessToken, body.refreshToken)
+                var authenticatedShopName: String? = null
+                var shopPendingApproval = false
+                val shopId = if (role == UserRole.SHOP_OPERATOR) {
+                    val shopsResponse = ApiClient.apiService.getShops()
+                    if (!shopsResponse.isSuccessful || shopsResponse.body() == null) {
+                        authTokenManager.clearSession()
+                        return AuthResult.Failure(
+                            "Could not load shops for this operator account.",
+                            "SHOP_LOAD_FAILED"
+                        )
+                    }
+                    val shop = shopsResponse.body()!!.firstOrNull()
+                        ?: if (!shopName.isNullOrBlank()) {
+                            val createResponse = ApiClient.apiService.createShop(
+                                bearerToken = "Bearer ${body.accessToken}",
+                                request = ShopCreateRequest(
+                                    name = shopName.trim(),
+                                    address = "Address pending registration"
+                                )
+                            )
+                            if (!createResponse.isSuccessful || createResponse.body() == null) {
+                                authTokenManager.clearSession()
+                                return AuthResult.Failure(
+                                    apiErrorMessage(
+                                        createResponse.errorBody()?.string(),
+                                        "Could not create the shop for this operator account."
+                                    ),
+                                    "SHOP_CREATE_FAILED"
+                                )
+                            }
+                            createResponse.body()!!
+                        } else {
+                            authTokenManager.clearSession()
+                            return AuthResult.Failure(
+                                "No shop is linked to this operator account. Enter the shop name to set it up.",
+                                "SHOP_NOT_LINKED"
+                            )
+                        }
+                    saveShop(
+                        Shop(
+                            id = shop.id,
+                            name = shop.name,
+                            address = shop.address,
+                            permanentQrPayload = shop.permanentQrPayload,
+                            isVerified = shop.isVerified,
+                            isOnline = shop.isOnline,
+                            supportedColor = shop.supportsColor,
+                            supportedDuplex = shop.supportsDuplex
+                        )
+                    )
+                    authenticatedShopName = shop.name
+                    shopPendingApproval = shop.status != "ACTIVE" || !shop.isVerified
+                    shop.id
+                } else {
+                    null
+                }
                 val user = AuthenticatedUser(
                     userId = body.user.id,
                     role = body.user.role,
-                    shopId = shopId
+                    shopId = shopId,
+                    fullName = body.user.fullName,
+                    email = body.user.email,
+                    phoneNumber = body.user.phoneNumber,
+                    shopName = authenticatedShopName,
+                    shopPendingApproval = shopPendingApproval
                 )
                 authTokenManager.saveAuth(user, body.accessToken, body.refreshToken)
-                // Connect WebSocket realtime transport
                 realtimeClient.connect("user:${body.user.id}", body.accessToken)
                 AuthResult.Success(user, body.accessToken, body.refreshToken)
             } else {
-                val errBody = response.errorBody()?.string() ?: "Login failed"
-                AuthResult.Failure(errBody, "AUTH_FAILED")
+                val errBody = response.errorBody()?.string()
+                AuthResult.Failure(apiErrorMessage(errBody, "Invalid email or password."), "AUTH_FAILED")
             }
         } catch (e: Exception) {
-            if (BuildConfig.DEBUG) {
-                val authRes = authTokenManager.authenticate(identity, role, shopId)
-                if (authRes is AuthResult.Success) {
-                    authTokenManager.saveAuth(authRes.user, authRes.accessToken, authRes.refreshToken)
-                    realtimeClient.connect("user:${authRes.user.userId}", authRes.accessToken)
-                }
-                return authRes
+            AuthResult.Failure(e.message ?: "Network error", "NETWORK_ERROR")
+        }
+    }
+
+    suspend fun register(
+        email: String,
+        password: String,
+        fullName: String,
+        phoneNumber: String?,
+        role: UserRole,
+        shopName: String? = null
+    ): AuthResult {
+        return try {
+            val response = ApiClient.apiService.register(
+                RegisterRequest(
+                    email = email.trim(),
+                    password = password,
+                    fullName = fullName.trim(),
+                    phoneNumber = phoneNumber?.trim()?.takeIf { it.isNotBlank() },
+                    role = role
+                )
+            )
+            if (!response.isSuccessful || response.body() == null) {
+                return AuthResult.Failure(
+                    apiErrorMessage(response.errorBody()?.string(), "Account registration failed."),
+                    if (response.code() == 409) "CONFLICT" else "REGISTER_FAILED"
+                )
             }
+
+            val body = response.body()!!
+            if (body.user.role != role) {
+                authTokenManager.clearSession()
+                return AuthResult.Failure("The server returned an unexpected account role.", "ROLE_MISMATCH")
+            }
+
+            val initialUser = AuthenticatedUser(
+                body.user.id,
+                body.user.role,
+                fullName = body.user.fullName,
+                email = body.user.email,
+                phoneNumber = body.user.phoneNumber
+            )
+            authTokenManager.saveAuth(initialUser, body.accessToken, body.refreshToken)
+            val shopId = if (role == UserRole.SHOP_OPERATOR) {
+                if (shopName.isNullOrBlank()) {
+                    authTokenManager.clearSession()
+                    return AuthResult.Failure("Enter the shop name.", "SHOP_NAME_REQUIRED")
+                }
+                val createResponse = ApiClient.apiService.createShop(
+                    bearerToken = "Bearer ${body.accessToken}",
+                    request = ShopCreateRequest(
+                        name = shopName.trim(),
+                        address = "Address pending registration"
+                    )
+                )
+                if (!createResponse.isSuccessful || createResponse.body() == null) {
+                    authTokenManager.clearSession()
+                    return AuthResult.Failure(
+                        apiErrorMessage(
+                            createResponse.errorBody()?.string(),
+                            "Account created, but shop setup failed. Sign in and retry shop setup."
+                        ),
+                        "SHOP_CREATE_FAILED"
+                    )
+                }
+                val shop = createResponse.body()!!
+                saveShop(
+                    Shop(
+                        id = shop.id,
+                        name = shop.name,
+                        address = shop.address,
+                        permanentQrPayload = shop.permanentQrPayload,
+                        isVerified = shop.isVerified,
+                        isOnline = shop.isOnline,
+                        supportedColor = shop.supportsColor,
+                        supportedDuplex = shop.supportsDuplex
+                    )
+                )
+                shop.id
+            } else {
+                null
+            }
+
+            val user = AuthenticatedUser(
+                body.user.id,
+                body.user.role,
+                shopId,
+                fullName = body.user.fullName,
+                email = body.user.email,
+                phoneNumber = body.user.phoneNumber,
+                shopName = shopName?.trim(),
+                shopPendingApproval = role == UserRole.SHOP_OPERATOR
+            )
+            authTokenManager.saveAuth(user, body.accessToken, body.refreshToken)
+            realtimeClient.connect("user:${body.user.id}", body.accessToken)
+            AuthResult.Success(user, body.accessToken, body.refreshToken)
+        } catch (e: Exception) {
             AuthResult.Failure(e.message ?: "Network error", "NETWORK_ERROR")
         }
     }

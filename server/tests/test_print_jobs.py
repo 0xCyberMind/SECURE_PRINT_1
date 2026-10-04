@@ -1,10 +1,11 @@
 import pytest
+import pytest_asyncio
 from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 
 
-@pytest.fixture
-def test_setup(client: TestClient):
+@pytest_asyncio.fixture
+async def test_setup(client: TestClient, admin_headers):
     # Register Customer User
     user = client.post("/api/v1/auth/register", json={
         "email": "job_user@example.com",
@@ -39,6 +40,13 @@ def test_setup(client: TestClient):
         json={"name": "Print Hub Beta", "address": "200 Beta Blvd"},
         headers={"Authorization": f"Bearer {op_b['access_token']}"}
     ).json()
+
+    for shop in (shop_a, shop_b):
+        approval = client.post(
+            f"/api/v1/shops/{shop['id']}/approve",
+            headers=admin_headers,
+        )
+        assert approval.status_code == 200, approval.text
 
     # User creates Ephemeral Session for Shop A
     sess_res = client.post(
@@ -81,7 +89,8 @@ def test_setup(client: TestClient):
     }
 
 
-def test_normal_job_lifecycle_and_atomic_completion(client: TestClient, test_setup):
+@pytest.mark.asyncio
+async def test_normal_job_lifecycle_and_atomic_completion(client: TestClient, test_setup):
     user = test_setup["user"]
     op_a = test_setup["op_a"]
     shop_a = test_setup["shop_a"]
@@ -156,7 +165,8 @@ def test_normal_job_lifecycle_and_atomic_completion(client: TestClient, test_set
     assert job_comp["completed_at"] is not None
 
 
-def test_duplicate_request_idempotency(client: TestClient, test_setup):
+@pytest.mark.asyncio
+async def test_duplicate_request_idempotency(client: TestClient, test_setup):
     user = test_setup["user"]
     shop_a = test_setup["shop_a"]
     session_a = test_setup["session_a"]
@@ -201,7 +211,8 @@ def test_duplicate_request_idempotency(client: TestClient, test_setup):
     assert job1["id"] == job2["id"]
 
 
-def test_copy_limit_enforcement(client: TestClient, test_setup):
+@pytest.mark.asyncio
+async def test_copy_limit_enforcement(client: TestClient, test_setup):
     user = test_setup["user"]
     shop_a = test_setup["shop_a"]
     session_a = test_setup["session_a"]
@@ -222,7 +233,8 @@ def test_copy_limit_enforcement(client: TestClient, test_setup):
     assert bad_req.json()["error"]["code"] == "COPY_LIMIT_REACHED"
 
 
-def test_cancellation_workflow_and_terminal_protection(client: TestClient, test_setup):
+@pytest.mark.asyncio
+async def test_cancellation_workflow_and_terminal_protection(client: TestClient, test_setup):
     user = test_setup["user"]
     op_a = test_setup["op_a"]
     shop_a = test_setup["shop_a"]
@@ -297,7 +309,8 @@ async def test_expired_job_protection(client: TestClient, test_setup, db_session
     assert auth_bad.json()["error"]["code"] == "JOB_EXPIRED"
 
 
-def test_wrong_shop_and_unauthorized_device_isolation(client: TestClient, test_setup):
+@pytest.mark.asyncio
+async def test_wrong_shop_and_unauthorized_device_isolation(client: TestClient, test_setup):
     user = test_setup["user"]
     op_a = test_setup["op_a"]
     op_b = test_setup["op_b"]  # Different shop operator
@@ -341,7 +354,8 @@ def test_wrong_shop_and_unauthorized_device_isolation(client: TestClient, test_s
     assert bad_spool.json()["error"]["code"] == "FORBIDDEN"
 
 
-def test_direct_completed_state_change_prevention(client: TestClient, test_setup):
+@pytest.mark.asyncio
+async def test_direct_completed_state_change_prevention(client: TestClient, test_setup):
     user = test_setup["user"]
     shop_a = test_setup["shop_a"]
     session_a = test_setup["session_a"]

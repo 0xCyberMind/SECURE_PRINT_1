@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import webbrowser
 import uvicorn
 from windows_agent.config import AgentConfig
 from windows_agent.agent_service import WindowsAgentService
@@ -23,8 +24,8 @@ async def main():
     logger.info(" Zero-Knowledge Cross-Platform Hardware Spooler ")
     logger.info("==================================================")
     logger.info(f"Target Server: {config.server_base_url}")
-    logger.info(f"Shop ID: {config.shop_id}")
-    logger.info(f"Dashboard URL: http://localhost:{config.dashboard_port}")
+    dashboard_url = f"http://127.0.0.1:{config.dashboard_port}"
+    logger.info(f"Dashboard URL: {dashboard_url}")
 
     # Start background agent
     await service.start()
@@ -32,11 +33,18 @@ async def main():
     # Start uvicorn server for local dashboard
     uvicorn_config = uvicorn.Config(
         app=dashboard_app,
-        host="0.0.0.0",
+        host="127.0.0.1",
         port=config.dashboard_port,
         log_level="warning"
     )
     server = uvicorn.Server(uvicorn_config)
+
+    async def open_dashboard_when_ready():
+        while not server.started:
+            await asyncio.sleep(0.1)
+        webbrowser.open(dashboard_url)
+
+    asyncio.create_task(open_dashboard_when_ready())
     await server.serve()
 
 if __name__ == "__main__":

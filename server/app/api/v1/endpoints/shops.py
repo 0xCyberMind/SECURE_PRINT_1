@@ -152,14 +152,36 @@ async def create_shop(
         address=payload.address,
         latitude=payload.latitude,
         longitude=payload.longitude,
-        status="ACTIVE",
-        is_verified=True,
-        is_online=True,
+        status="PENDING_APPROVAL" if principal.role == UserRole.SHOP_OPERATOR else "ACTIVE",
+        is_verified=principal.role == UserRole.ADMIN,
+        is_online=principal.role == UserRole.ADMIN,
         supports_color=payload.supports_color,
         supports_duplex=payload.supports_duplex,
         permanent_qr_payload=qr_payload
     )
     await db.commit()
+    return ShopResponse.model_validate(shop)
+
+
+@router.post("/{shop_id}/approve", response_model=ShopResponse)
+async def approve_shop(
+    shop_id: str,
+    db: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(require_roles([UserRole.ADMIN])),
+) -> ShopResponse:
+    shop = await db.get(Shop, shop_id)
+    if not shop:
+        raise PrivPrintException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code=ErrorCode.NOT_FOUND,
+            message=f"Shop {shop_id} not found"
+        )
+
+    shop.status = "ACTIVE"
+    shop.is_verified = True
+    shop.is_online = True
+    await db.commit()
+    await db.refresh(shop)
     return ShopResponse.model_validate(shop)
 
 
@@ -223,4 +245,3 @@ async def get_shop_printers(
     printer_repo = PrinterRepository(db)
     printers = await printer_repo.list_by_shop(shop_id)
     return [PrinterResponse.model_validate(p) for p in printers]
-

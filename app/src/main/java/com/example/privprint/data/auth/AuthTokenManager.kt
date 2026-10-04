@@ -11,7 +11,12 @@ data class AuthenticatedUser(
     val userId: String,
     val role: UserRole,
     val shopId: String? = null,
-    val deviceId: String? = null
+    val deviceId: String? = null,
+    val fullName: String? = null,
+    val email: String? = null,
+    val phoneNumber: String? = null,
+    val shopName: String? = null,
+    val shopPendingApproval: Boolean = false
 )
 
 data class TokenSession(

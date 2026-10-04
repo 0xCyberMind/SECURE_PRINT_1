@@ -99,8 +99,6 @@ fun PrivPrintApp(viewModel: PrivPrintViewModel) {
     val pendingLoginRole by viewModel.pendingLoginRole.collectAsStateWithLifecycle()
     val authLoginInProgress by viewModel.authLoginInProgress.collectAsStateWithLifecycle()
     val authLoginError by viewModel.authLoginError.collectAsStateWithLifecycle()
-    val userOtpRequested by viewModel.userOtpRequested.collectAsStateWithLifecycle()
-    val shopOtpRequested by viewModel.shopOtpRequested.collectAsStateWithLifecycle()
     val canCancelLogin = currentUser != null || currentShopAuth != null
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -132,28 +130,29 @@ fun PrivPrintApp(viewModel: PrivPrintViewModel) {
             initialTab = initialTab,
             canCancel = canCancelLogin,
             onCancel = { viewModel.cancelLogin() },
-            onLoginUser = { name, phone ->
-                viewModel.requestUserOtp(name, phone)
+            onAuthenticateUser = { email, password, fullName, phone, register ->
+                viewModel.authenticate(
+                    email = email,
+                    password = password,
+                    fullName = fullName,
+                    phone = phone,
+                    role = com.example.privprint.data.api.models.UserRole.USER,
+                    register = register
+                )
             },
-            onVerifyUserOtp = { code ->
-                viewModel.verifyUserOtp(code)
-            },
-            onResetUserOtp = {
-                viewModel.resetUserOtp()
-            },
-            onLoginShop = { shopName, opName, opPhone ->
-                viewModel.requestShopOtp(shopName, opName, opPhone)
-            },
-            onVerifyShopOtp = { code ->
-                viewModel.verifyShopOtp(code)
-            },
-            onResetShopOtp = {
-                viewModel.resetShopOtp()
+            onAuthenticateShop = { shopName, operatorName, email, password, phone, register ->
+                viewModel.authenticate(
+                    email = email,
+                    password = password,
+                    fullName = operatorName,
+                    phone = phone,
+                    role = com.example.privprint.data.api.models.UserRole.SHOP_OPERATOR,
+                    shopName = shopName,
+                    register = register
+                )
             },
             loginInProgress = authLoginInProgress,
             loginError = authLoginError,
-            userOtpRequested = userOtpRequested,
-            shopOtpRequested = shopOtpRequested,
         )
         return
     }

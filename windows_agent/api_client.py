@@ -2,6 +2,7 @@ import httpx
 from typing import Optional, List, Dict, Any
 from windows_agent.config import AgentConfig
 
+
 class WindowsAgentApiClient:
     """
     Outbound HTTPS REST Client for Windows Shop Station Agent.
@@ -13,6 +14,52 @@ class WindowsAgentApiClient:
         self.base_url = config.server_base_url.rstrip("/")
         self.access_token: Optional[str] = config.access_token
         self.refresh_token: Optional[str] = config.refresh_token
+
+    @staticmethod
+    def _raise_for_response(response: httpx.Response) -> None:
+        if response.is_success:
+            return
+        message = None
+        try:
+            message = response.json().get("error", {}).get("message")
+        except (ValueError, AttributeError):
+            pass
+        if not message:
+            message = f"Request failed (HTTP {response.status_code})"
+        raise RuntimeError(message)
+
+    async def request_operator_otp(self, phone_number: str) -> None:
+        url = f"{self.base_url}/api/v1/auth/phone/request-otp"
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(
+                url,
+                json={"phone_number": phone_number, "role": "SHOP_OPERATOR"},
+            )
+        self._raise_for_response(response)
+
+    async def verify_operator_otp(self, phone_number: str, otp: str) -> Dict[str, Any]:
+        url = f"{self.base_url}/api/v1/auth/phone/verify-otp"
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(
+                url,
+                json={
+                    "phone_number": phone_number,
+                    "otp": otp,
+                    "role": "SHOP_OPERATOR",
+                },
+            )
+        self._raise_for_response(response)
+        return response.json()
+
+    async def list_operator_shops(self, operator_token: str) -> List[Dict[str, Any]]:
+        url = f"{self.base_url}/api/v1/shops"
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(
+                url,
+                headers={"Authorization": f"Bearer {operator_token}"},
+            )
+        self._raise_for_response(response)
+        return response.json()
 
     def _headers(self) -> Dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -37,7 +84,7 @@ class WindowsAgentApiClient:
 
         async with httpx.AsyncClient(timeout=10.0) as client:
             res = await client.post(url, json=payload, headers=headers)
-            res.raise_for_status()
+            self._raise_for_response(res)
             data = res.json()
             self.config.device_id = data.get("device_id")
             self.config.api_key = data.get("api_key")
@@ -55,7 +102,7 @@ class WindowsAgentApiClient:
         }
         async with httpx.AsyncClient(timeout=10.0) as client:
             res = await client.post(url, json=payload)
-            res.raise_for_status()
+            self._raise_for_response(res)
             data = res.json()
             self.access_token = data.get("accessToken") or data.get("access_token")
             self.refresh_token = data.get("refreshToken") or data.get("refresh_token")
@@ -157,5 +204,4 @@ class WindowsAgentApiClient:
             self.config.access_token = self.access_token
             self.config.refresh_token = self.refresh_token
             return data
-
 

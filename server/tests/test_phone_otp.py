@@ -65,3 +65,31 @@ def test_twilio_phone_otp_uses_provider_and_normalized_number(
 
     assert verification.status_code == 200, verification.text
     assert checked_codes == [("+919876543210", "654321")]
+
+
+def test_shop_operator_otp_uses_same_twilio_provider(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "AC-test")
+    monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "test-token")
+    monkeypatch.setattr(settings, "TWILIO_VERIFY_SERVICE_SID", "VA-test")
+    sent_requests = []
+
+    async def start_verification(phone_number: str) -> None:
+        sent_requests.append(phone_number)
+
+    monkeypatch.setattr(twilio_verify, "start_verification", start_verification)
+
+    response = client.post(
+        "/api/v1/auth/phone/request-otp",
+        json={
+            "phone_number": "+919876543210",
+            "role": "SHOP_OPERATOR",
+            "shop_id": "SHOP-TEST",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["development_otp"] is None
+    assert sent_requests == ["+919876543210"]

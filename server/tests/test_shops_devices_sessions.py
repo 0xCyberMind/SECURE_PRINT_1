@@ -35,7 +35,9 @@ def test_shop_endpoints_and_permanent_qr(client: TestClient):
     assert shop["address"] == "400 Student Union Blvd"
     assert shop["latitude"] == 37.7749
     assert shop["longitude"] == -122.4194
-    assert shop["status"] == "ACTIVE"
+    assert shop["status"] == "PENDING_APPROVAL"
+    assert shop["is_verified"] is False
+    assert shop["is_online"] is False
     assert "created_at" in shop
     assert "updated_at" in shop
 

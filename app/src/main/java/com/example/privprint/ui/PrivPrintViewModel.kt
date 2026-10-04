@@ -316,6 +316,133 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
 
     // --- Authentication Actions ---
 
+    fun authenticate(
+        email: String,
+        password: String,
+        fullName: String,
+        phone: String,
+        role: UserRole,
+        shopName: String = "",
+        register: Boolean
+    ): Boolean {
+        val normalizedEmail = email.trim()
+        if (_authLoginInProgress.value) return true
+        if (normalizedEmail.isBlank() || password.isBlank()) {
+            _authLoginError.value = "Enter your email and password."
+            return false
+        }
+        if (register && fullName.isBlank()) {
+            _authLoginError.value = "Enter your full name."
+            return false
+        }
+        if (register && password.length < 8) {
+            _authLoginError.value = "Password must be at least 8 characters."
+            return false
+        }
+        if (register && role == UserRole.SHOP_OPERATOR && shopName.isBlank()) {
+            _authLoginError.value = "Enter your shop name."
+            return false
+        }
+
+        _authLoginError.value = null
+        _authLoginInProgress.value = true
+        viewModelScope.launch {
+            val result = if (register) {
+                repository.register(
+                    email = normalizedEmail,
+                    password = password,
+                    fullName = fullName,
+                    phoneNumber = phone,
+                    role = role,
+                    shopName = shopName
+                )
+            } else {
+                repository.login(
+                    identity = normalizedEmail,
+                    secret = password,
+                    role = role,
+                    shopName = shopName
+                )
+            }
+
+            when (result) {
+                is com.example.privprint.data.auth.AuthResult.Success -> {
+                    val nowPhone = phone.trim().ifBlank { result.user.phoneNumber.orEmpty() }
+                    if (role == UserRole.USER) {
+                        val displayName = fullName.ifBlank {
+                            result.user.fullName?.takeIf { it.isNotBlank() }
+                                ?: normalizedEmail.substringBefore("@")
+                        }
+                        _currentUser.value = AuthUser(name = displayName, phoneNumber = nowPhone)
+                        _authState.value = AuthState.USER_LOGGED_IN
+                        _currentMode.value = AppMode.USER
+                        _pendingLoginRole.value = null
+                        _userUiState.value = _userUiState.value.copy(
+                            currentScreen = UserScreen.HOME,
+                            toastMessage = "Welcome, $displayName! Secure session started."
+                        )
+                        prefs.edit()
+                            .putString("auth_state", AuthState.USER_LOGGED_IN.name)
+                            .putString("user_name", displayName)
+                            .putString("user_phone", nowPhone)
+                            .apply()
+                    } else {
+                        val shop = AuthShop(
+                            shopId = result.user.shopId.orEmpty(),
+                            shopName = shopName.trim().ifBlank { result.user.shopName.orEmpty() },
+                            operatorName = fullName.ifBlank {
+                                result.user.fullName?.takeIf { it.isNotBlank() }
+                                    ?: normalizedEmail.substringBefore("@")
+                            },
+                            operatorPhone = nowPhone
+                        )
+                        _currentShopAuth.value = shop
+                        _authState.value = AuthState.SHOP_LOGGED_IN
+                        _currentMode.value = AppMode.SHOP
+                        _pendingLoginRole.value = null
+                        _shopUiState.value = _shopUiState.value.copy(
+                            currentScreen = ShopScreen.DASHBOARD,
+                            statusNotice = if (result.user.shopPendingApproval) {
+                                "Shop account created. It is hidden until admin approval."
+                            } else {
+                                "Shop operator signed in: ${shop.shopName}"
+                            }
+                        )
+                        prefs.edit()
+                            .putString("auth_state", AuthState.SHOP_LOGGED_IN.name)
+                            .putString("shop_id", shop.shopId)
+                            .putString("shop_name", shop.shopName)
+                            .putString("operator_name", shop.operatorName)
+                            .putString("operator_phone", nowPhone)
+                            .apply()
+                        if (allPrinters.value.isEmpty()) {
+                            val printerId = "PRN-${System.currentTimeMillis().toString().takeLast(6)}"
+                            repository.savePrinter(
+                                Printer(
+                                    id = printerId,
+                                    shopId = shop.shopId,
+                                    name = "Xerox / Network Printer",
+                                    model = "Windows or network-connected printer",
+                                    isDefault = true,
+                                    status = PrinterStatus.READY,
+                                    paperStatus = PaperTrayStatus.FULL,
+                                    tonerLevelPercent = 95,
+                                    totalPrintedLifetime = 0
+                                )
+                            )
+                        }
+                    }
+                    _authLoginInProgress.value = false
+                }
+                is com.example.privprint.data.auth.AuthResult.Failure -> {
+                    _authLoginError.value = result.error
+                    _authLoginInProgress.value = false
+                }
+            }
+        }
+        return true
+    }
+
     fun requestUserOtp(name: String, phoneNumber: String): Boolean {
         val trimmedName = name.trim()
         val trimmedPhone = phoneNumber.trim()

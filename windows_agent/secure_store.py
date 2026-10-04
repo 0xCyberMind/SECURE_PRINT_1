@@ -13,19 +13,34 @@ class SecureCredentialStore:
 
     def __init__(self, storage_path: Optional[str] = None):
         if storage_path is None:
-            base_dir = os.path.dirname(__file__)
+            if self._is_windows():
+                base_dir = os.path.join(
+                    os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
+                    "PrivPrintStation",
+                )
+                os.makedirs(base_dir, exist_ok=True)
+            else:
+                base_dir = os.path.dirname(__file__)
             storage_path = os.path.join(base_dir, ".secure_credentials.dat")
         self.storage_path = storage_path
 
     def _is_windows(self) -> bool:
         return sys.platform == "win32"
 
-    def store_credentials(self, device_id: str, api_key: str, access_token: str, refresh_token: str):
+    def store_credentials(
+        self,
+        device_id: str,
+        api_key: str,
+        access_token: str,
+        refresh_token: str,
+        shop_id: Optional[str] = None,
+    ):
         payload = {
             "device_id": device_id,
             "api_key": api_key,
             "access_token": access_token,
-            "refresh_token": refresh_token
+            "refresh_token": refresh_token,
+            "shop_id": shop_id,
         }
         raw_bytes = json.dumps(payload).encode("utf-8")
 
