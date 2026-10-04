@@ -123,9 +123,9 @@ fun PrivPrintTopBar(
                     }
                     Text(
                         text = if (currentMode == AppMode.USER) {
-                            currentUser?.let { "${it.name}" } ?: "Secure Print Client"
+                            currentUser?.let { "Customer account" } ?: "Secure Print Client"
                         } else {
-                            currentShopAuth?.let { "${it.operatorName} • Terminal" } ?: "Shop Operator Terminal"
+                            currentShopAuth?.let { "Shop operator • Terminal" } ?: "Shop Operator Terminal"
                         },
                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -198,12 +198,12 @@ fun PrivPrintTopBar(
                         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                             if (currentMode == AppMode.USER) {
                                 Text(
-                                    text = currentUser?.name ?: "Customer User",
+                                    text = "Customer account",
                                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = currentUser?.phoneNumber ?: "Mobile: +1 555-0199",
+                                    text = "Mobile: ${maskedPhoneNumber(currentUser?.phoneNumber)}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -214,12 +214,12 @@ fun PrivPrintTopBar(
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "Operator: ${currentShopAuth?.operatorName ?: "Mike"}",
+                                    text = "Shop operator",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = "Phone: ${currentShopAuth?.operatorPhone ?: ""}",
+                                    text = "Phone: ${maskedPhoneNumber(currentShopAuth?.operatorPhone)}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )

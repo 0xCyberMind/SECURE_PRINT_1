@@ -69,6 +69,8 @@ import com.example.privprint.ui.components.PrivPrintOutlinedButton
 import com.example.privprint.ui.components.PrivPrintPrimaryButton
 import com.example.privprint.ui.components.PrivPrintSectionHeader
 import com.example.privprint.ui.components.PrivPrintStatusBadge
+import com.example.privprint.ui.components.PRIVATE_DOCUMENT_LABEL
+import com.example.privprint.ui.components.maskedPhoneNumber
 import com.example.privprint.ui.components.QrCodeCanvas
 
 @Composable
@@ -123,12 +125,12 @@ fun ShopDashboardScreen(
                     ) {
                         Column {
                             Text(
-                                text = "Station Operator: ${currentShopAuth.operatorName}",
+                                text = "Station Operator",
                                 style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "${currentShopAuth.operatorPhone} • Terminal PIN Verified",
+                                text = "${maskedPhoneNumber(currentShopAuth.operatorPhone)} • OTP Verified",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -444,7 +446,7 @@ fun ShopDashboardScreen(
                     if (activeJob != null) {
                         Column {
                             Text(
-                                text = "Job #${activeJob.jobId.takeLast(4)} • ${activeJob.documentName}",
+                                text = "Job #${activeJob.jobId.takeLast(4)} • $PRIVATE_DOCUMENT_LABEL",
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -558,7 +560,7 @@ fun ShopDashboardScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "#${job.jobId.takeLast(4)} • ${job.documentName}",
+                                text = "#${job.jobId.takeLast(4)} • $PRIVATE_DOCUMENT_LABEL",
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                                 color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,

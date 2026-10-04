@@ -37,6 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.privprint.data.model.PrintJob
+import com.example.privprint.ui.components.PRIVATE_DOCUMENT_LABEL
 import com.example.privprint.ui.components.PrivPrintCard
 import com.example.privprint.ui.components.PrivPrintEmptyState
 import com.example.privprint.ui.components.PrivPrintStatusBadge
@@ -126,7 +127,7 @@ fun HistoryScreen(
                             Spacer(modifier = Modifier.width(14.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = job.documentName,
+                                    text = PRIVATE_DOCUMENT_LABEL,
                                     style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
                                     color = MaterialTheme.colorScheme.onSurface,
                                     maxLines = 1,

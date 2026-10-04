@@ -54,6 +54,7 @@ import com.example.privprint.data.model.AuditEvent
 import com.example.privprint.data.model.AuditSeverity
 import com.example.privprint.data.model.PrintJob
 import com.example.privprint.data.model.PrintSession
+import com.example.privprint.ui.components.PRIVATE_AUDIT_DETAILS_LABEL
 import com.example.privprint.ui.components.CornerRadiusButton
 import com.example.privprint.ui.components.PrivPrintCard
 import com.example.privprint.ui.components.PrivPrintEmptyState
@@ -326,7 +327,7 @@ fun PrivacyCenterScreen(
                                     )
                                 }
                                 Text(
-                                    text = event.details,
+                                    text = PRIVATE_AUDIT_DETAILS_LABEL,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )

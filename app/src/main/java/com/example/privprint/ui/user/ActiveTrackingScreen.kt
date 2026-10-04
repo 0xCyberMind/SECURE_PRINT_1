@@ -62,6 +62,7 @@ import com.example.privprint.ui.components.PrivPrintOutlinedButton
 import com.example.privprint.ui.components.PrivPrintPrimaryButton
 import com.example.privprint.ui.components.PrivPrintPrivacyIndicator
 import com.example.privprint.ui.components.PrivPrintStatusBadge
+import com.example.privprint.ui.components.PRIVATE_DOCUMENT_LABEL
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -171,7 +172,7 @@ fun ActiveTrackingScreen(
                         )
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        DetailRow(label = "Document name", value = job.documentName)
+                        DetailRow(label = "Document", value = PRIVATE_DOCUMENT_LABEL)
                         DetailRow(label = "Number of copies", value = "${job.copiesPrinted} copies")
                         DetailRow(label = "Shop", value = job.shopName)
                         DetailRow(label = "Time", value = timeFormat.format(Date(job.createdAt)))
@@ -333,7 +334,7 @@ fun ActiveTrackingScreen(
                     Spacer(modifier = Modifier.height(14.dp))
 
                     Text(
-                        text = "Document: ${job.documentName}",
+                        text = "Document: $PRIVATE_DOCUMENT_LABEL",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

@@ -65,11 +65,13 @@ import com.example.privprint.ui.AuthUser
 import com.example.privprint.ui.UserScreen
 import com.example.privprint.ui.components.CornerRadiusButton
 import com.example.privprint.ui.components.CornerRadiusCard
+import com.example.privprint.ui.components.PRIVATE_DOCUMENT_LABEL
 import com.example.privprint.ui.components.PrivPrintCard
 import com.example.privprint.ui.components.PrivPrintEmptyState
 import com.example.privprint.ui.components.PrivPrintPrivacyIndicator
 import com.example.privprint.ui.components.PrivPrintSectionHeader
 import com.example.privprint.ui.components.PrivPrintStatusBadge
+import com.example.privprint.ui.components.maskedPhoneNumber
 
 @Composable
 fun UserHomeScreen(
@@ -99,12 +101,12 @@ fun UserHomeScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Hello, ${currentUser.name} 👋",
+                            text = "Welcome back 👋",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onBackground
                         )
                         Text(
-                            text = "Mobile: ${currentUser.phoneNumber} • End-to-End Encrypted",
+                            text = "Mobile: ${maskedPhoneNumber(currentUser.phoneNumber)} • End-to-End Encrypted",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -285,7 +287,7 @@ fun UserHomeScreen(
 
                         Spacer(modifier = Modifier.height(10.dp))
                         Text(
-                            text = activeJob.documentName,
+                            text = PRIVATE_DOCUMENT_LABEL,
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
@@ -534,7 +536,7 @@ fun UserHomeScreen(
                         Spacer(modifier = Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = job.documentName,
+                                text = PRIVATE_DOCUMENT_LABEL,
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                                 color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,

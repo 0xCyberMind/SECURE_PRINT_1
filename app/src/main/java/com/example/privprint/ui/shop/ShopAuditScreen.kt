@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.privprint.data.model.AuditEvent
 import com.example.privprint.data.model.AuditSeverity
+import com.example.privprint.ui.components.PRIVATE_AUDIT_DETAILS_LABEL
 import com.example.privprint.ui.components.PrivPrintCard
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -160,7 +161,7 @@ fun ShopAuditScreen(
                                 )
                             }
                             Text(
-                                text = event.details,
+                                text = PRIVATE_AUDIT_DETAILS_LABEL,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

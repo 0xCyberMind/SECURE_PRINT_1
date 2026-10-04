@@ -32,10 +32,6 @@ import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Storefront
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -62,13 +58,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.privprint.ui.components.CornerRadiusButton
 import com.example.privprint.ui.components.PrivPrintCard
 import com.example.privprint.ui.components.PrivPrintPrimaryButton
+import com.example.privprint.ui.components.maskedPhoneNumber
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,11 +75,13 @@ fun AuthScreen(
     onLoginUser: (name: String, phone: String) -> Boolean,
     onVerifyUserOtp: (code: String) -> Boolean,
     onResetUserOtp: () -> Unit,
-    onLoginShop: (shopId: String, shopName: String, operatorName: String, operatorPhone: String, pin: String) -> Boolean,
+    onLoginShop: (shopName: String, operatorName: String, operatorPhone: String) -> Boolean,
+    onVerifyShopOtp: (code: String) -> Boolean,
+    onResetShopOtp: () -> Unit,
     loginInProgress: Boolean = false,
     loginError: String? = null,
     userOtpRequested: Boolean = false,
-    developmentOtp: String? = null,
+    shopOtpRequested: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     // 0 = Customer Login, 1 = Xerox Shop Operator Login
@@ -198,7 +196,6 @@ fun AuthScreen(
                     loginInProgress = loginInProgress,
                     loginError = loginError,
                     otpRequested = userOtpRequested,
-                    developmentOtp = developmentOtp,
                     onSwitchToShop = { selectedTab = 1 }
                 )
             }
@@ -210,6 +207,11 @@ fun AuthScreen(
             ) {
                 ShopOperatorLoginForm(
                     onLogin = onLoginShop,
+                    onVerifyOtp = onVerifyShopOtp,
+                    onResetOtp = onResetShopOtp,
+                    loginInProgress = loginInProgress,
+                    loginError = loginError,
+                    otpRequested = shopOtpRequested,
                     onSwitchToCustomer = { selectedTab = 0 }
                 )
             }
@@ -305,7 +307,6 @@ private fun CustomerLoginForm(
     loginInProgress: Boolean,
     loginError: String?,
     otpRequested: Boolean,
-    developmentOtp: String?,
     onSwitchToShop: () -> Unit
 ) {
     val focusManager = LocalFocusManager.current
@@ -412,17 +413,10 @@ private fun CustomerLoginForm(
 
             if (otpRequested) {
                 Text(
-                    text = "Enter the 6-digit code sent to $phone.",
+                    text = "Enter the 6-digit code sent to ${maskedPhoneNumber(phone)}.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                if (developmentOtp != null) {
-                    Text(
-                        text = "Development code: $developmentOtp",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
                 OutlinedTextField(
                     value = otp,
                     onValueChange = { value ->
@@ -431,6 +425,7 @@ private fun CustomerLoginForm(
                     },
                     label = { Text("Verification code") },
                     singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Number,
                         imeAction = ImeAction.Done
@@ -541,16 +536,19 @@ private fun CustomerLoginForm(
 
 @Composable
 private fun ShopOperatorLoginForm(
-    onLogin: (shopId: String, shopName: String, operatorName: String, operatorPhone: String, pin: String) -> Boolean,
+    onLogin: (shopName: String, operatorName: String, operatorPhone: String) -> Boolean,
+    onVerifyOtp: (code: String) -> Boolean,
+    onResetOtp: () -> Unit,
+    loginInProgress: Boolean,
+    loginError: String?,
+    otpRequested: Boolean,
     onSwitchToCustomer: () -> Unit
 ) {
     val focusManager = LocalFocusManager.current
     var shopName by remember { mutableStateOf("") }
-    var shopId by remember { mutableStateOf("") }
     var operatorName by remember { mutableStateOf("") }
     var operatorPhone by remember { mutableStateOf("") }
-    var pin by remember { mutableStateOf("") }
-    var pinVisible by remember { mutableStateOf(false) }
+    var otp by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     PrivPrintCard(
@@ -577,31 +575,6 @@ private fun ShopOperatorLoginForm(
                 )
             }
 
-            // Quick Fill demo chip for Shop
-            AssistChip(
-                onClick = {
-                    shopName = "Campus Xerox & Print"
-                    shopId = "SHOP-101"
-                    operatorName = "Station Operator"
-                    operatorPhone = "+1 (555) 018-8321"
-                    pin = "1234"
-                    errorMessage = null
-                },
-                label = { Text("Demo Station: Campus Xerox • PIN: 1234", fontSize = 12.sp) },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                },
-                colors = AssistChipDefaults.assistChipColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-                    labelColor = MaterialTheme.colorScheme.primary
-                )
-            )
-
             // Shop Station Name Field
             OutlinedTextField(
                 value = shopName,
@@ -611,6 +584,7 @@ private fun ShopOperatorLoginForm(
                 },
                 label = { Text("Shop / Store Name") },
                 placeholder = { Text("e.g. Apex Campus Xerox & Print") },
+                enabled = !otpRequested,
                 leadingIcon = {
                     Icon(
                         imageVector = Icons.Default.Storefront,
@@ -638,6 +612,7 @@ private fun ShopOperatorLoginForm(
                 },
                 label = { Text("Operator Name") },
                 placeholder = { Text("e.g. Mike Operator") },
+                enabled = !otpRequested,
                 leadingIcon = {
                     Icon(
                         imageVector = Icons.Default.Badge,
@@ -665,6 +640,7 @@ private fun ShopOperatorLoginForm(
                 },
                 label = { Text("Operator Mobile Number") },
                 placeholder = { Text("e.g. +1 (555) 018-8321") },
+                enabled = !otpRequested,
                 leadingIcon = {
                     Icon(
                         imageVector = Icons.Default.Phone,
@@ -687,59 +663,58 @@ private fun ShopOperatorLoginForm(
                     .testTag("operator_phone_input")
             )
 
-            // Terminal Access PIN
-            OutlinedTextField(
-                value = pin,
-                onValueChange = {
-                    pin = it
-                    errorMessage = null
-                },
-                label = { Text("Terminal Access PIN") },
-                placeholder = { Text("4-digit PIN (Demo: 1234)") },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Lock,
-                        contentDescription = "PIN",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                },
-                trailingIcon = {
-                    IconButton(onClick = { pinVisible = !pinVisible }) {
-                        Icon(
-                            imageVector = if (pinVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                            contentDescription = if (pinVisible) "Hide PIN" else "Show PIN"
-                        )
-                    }
-                },
-                visualTransformation = if (pinVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.NumberPassword,
-                    imeAction = ImeAction.Done
-                ),
-                keyboardActions = KeyboardActions(
-                    onDone = {
-                        focusManager.clearFocus()
-                        if (operatorName.isBlank() || pin.length < 4) {
-                            errorMessage = "Please enter operator name and a 4-digit PIN (Demo: 1234)."
-                        } else {
-                            onLogin(shopId, shopName, operatorName, operatorPhone, pin)
-                        }
-                    }
-                ),
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("terminal_pin_input")
-            )
-
-            if (errorMessage != null) {
+            if (otpRequested) {
                 Text(
-                    text = errorMessage!!,
+                    text = "Enter the 6-digit code sent to ${maskedPhoneNumber(operatorPhone)}.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = otp,
+                    onValueChange = {
+                        otp = it.filter(Char::isDigit).take(6)
+                        errorMessage = null
+                    },
+                    label = { Text("SMS verification code") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = "Verification code",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            focusManager.clearFocus()
+                            onVerifyOtp(otp)
+                        }
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().testTag("shop_otp_input")
+                )
+                TextButton(
+                    onClick = {
+                        onResetOtp()
+                        otp = ""
+                        errorMessage = null
+                    },
+                    enabled = !loginInProgress,
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text("Use a different phone number")
+                }
+            }
+
+            val visibleError = loginError ?: errorMessage
+            if (visibleError != null) {
+                Text(
+                    text = visibleError,
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(horizontal = 4.dp)
@@ -774,21 +749,28 @@ private fun ShopOperatorLoginForm(
 
             // Primary Action
             PrivPrintPrimaryButton(
-                text = "Open Operator Terminal",
+                text = if (otpRequested) "Verify Shop Phone" else "Send Verification Code",
                 icon = Icons.Default.Storefront,
                 onClick = {
                     focusManager.clearFocus()
-                    if (operatorName.isBlank() || pin.length < 4) {
-                        errorMessage = "Please enter operator name and a 4-digit station PIN (Demo: 1234)."
+                    if (loginInProgress) {
+                        return@PrivPrintPrimaryButton
+                    }
+                    if (otpRequested) {
+                        if (!onVerifyOtp(otp)) {
+                            errorMessage = "Enter the 6-digit verification code."
+                        }
                     } else {
-                        val success = onLogin(shopId, shopName, operatorName, operatorPhone, pin)
+                        val success = onLogin(shopName, operatorName, operatorPhone)
                         if (!success) {
-                            errorMessage = "Invalid station PIN or credentials."
+                            errorMessage = "Enter your shop name, operator name, and phone number."
                         }
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
-                testTag = "shop_login_submit_btn"
+                testTag = "shop_login_submit_btn",
+                enabled = !loginInProgress,
+                isLoading = loginInProgress
             )
 
             // Bottom Switcher

@@ -73,6 +73,7 @@ import com.example.privprint.ui.AuthUser
 import com.example.privprint.ui.components.CornerRadiusCard
 import com.example.privprint.ui.components.PrivPrintCard
 import com.example.privprint.ui.components.PrivPrintOutlinedButton
+import com.example.privprint.ui.components.maskedPhoneNumber
 import com.example.ui.theme.ThemeMode
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -259,8 +260,12 @@ fun SettingsScreen(
                     ) {
                         SettingsRow(
                             icon = Icons.Default.Person,
-                            title = currentUser?.name?.ifBlank { "Customer Account" } ?: "Customer Account",
-                            subtitle = if (!currentUser?.phoneNumber.isNullOrBlank()) "Mobile: ${currentUser?.phoneNumber}" else "Active Encrypted Session"
+                            title = "Customer Account",
+                            subtitle = if (!currentUser?.phoneNumber.isNullOrBlank()) {
+                                "Mobile: ${maskedPhoneNumber(currentUser?.phoneNumber)}"
+                            } else {
+                                "Active Encrypted Session"
+                            }
                         )
                         SettingsRow(
                             icon = Icons.Default.Shield,

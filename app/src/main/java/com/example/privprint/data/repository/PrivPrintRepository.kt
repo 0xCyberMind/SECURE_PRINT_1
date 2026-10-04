@@ -75,8 +75,9 @@ class PrivPrintRepository(
                 PhoneOtpRequest(phoneNumber, role, shopId)
             )
             if (!response.isSuccessful || response.body() == null) {
+                val errorBody = response.errorBody()?.string()
                 OtpRequestResult.Failure(
-                    response.errorBody()?.string() ?: "OTP request failed"
+                    apiErrorMessage(errorBody, "OTP request failed")
                 )
             } else {
                 OtpRequestResult.Sent(response.body()!!)
@@ -97,9 +98,14 @@ class PrivPrintRepository(
                 PhoneOtpVerifyRequest(phoneNumber, otp, role, shopId)
             )
             if (!response.isSuccessful || response.body() == null) {
+                val errorBody = response.errorBody()?.string()
                 return AuthResult.Failure(
-                    response.errorBody()?.string() ?: "OTP verification failed",
-                    "OTP_VERIFY_FAILED"
+                    apiErrorMessage(errorBody, "OTP verification failed"),
+                    if (response.code() == 409) {
+                        "CONFLICT"
+                    } else {
+                        apiErrorCode(errorBody) ?: "OTP_VERIFY_FAILED"
+                    }
                 )
             }
 
@@ -111,6 +117,27 @@ class PrivPrintRepository(
         } catch (e: Exception) {
             AuthResult.Failure(e.message ?: "Network error", "NETWORK_ERROR")
         }
+    }
+
+    private fun apiErrorMessage(body: String?, fallback: String): String {
+        if (body.isNullOrBlank()) return fallback
+        val message = runCatching {
+            org.json.JSONObject(body)
+                .optJSONObject("error")
+                ?.optString("message")
+                ?.takeIf { it.isNotBlank() }
+        }.getOrNull()
+        return message ?: body.take(300)
+    }
+
+    private fun apiErrorCode(body: String?): String? {
+        if (body.isNullOrBlank()) return null
+        return runCatching {
+            org.json.JSONObject(body)
+                .optJSONObject("error")
+                ?.optString("code")
+                ?.takeIf { it.isNotBlank() }
+        }.getOrNull()
     }
 
     suspend fun loginWithPhoneOtp(

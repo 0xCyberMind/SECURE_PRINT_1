@@ -100,7 +100,7 @@ fun PrivPrintApp(viewModel: PrivPrintViewModel) {
     val authLoginInProgress by viewModel.authLoginInProgress.collectAsStateWithLifecycle()
     val authLoginError by viewModel.authLoginError.collectAsStateWithLifecycle()
     val userOtpRequested by viewModel.userOtpRequested.collectAsStateWithLifecycle()
-    val developmentOtp by viewModel.developmentOtp.collectAsStateWithLifecycle()
+    val shopOtpRequested by viewModel.shopOtpRequested.collectAsStateWithLifecycle()
     val canCancelLogin = currentUser != null || currentShopAuth != null
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -141,13 +141,19 @@ fun PrivPrintApp(viewModel: PrivPrintViewModel) {
             onResetUserOtp = {
                 viewModel.resetUserOtp()
             },
-            onLoginShop = { shopId, shopName, opName, opPhone, pin ->
-                viewModel.loginAsShop(shopId, shopName, opName, opPhone, pin)
+            onLoginShop = { shopName, opName, opPhone ->
+                viewModel.requestShopOtp(shopName, opName, opPhone)
+            },
+            onVerifyShopOtp = { code ->
+                viewModel.verifyShopOtp(code)
+            },
+            onResetShopOtp = {
+                viewModel.resetShopOtp()
             },
             loginInProgress = authLoginInProgress,
             loginError = authLoginError,
             userOtpRequested = userOtpRequested,
-            developmentOtp = developmentOtp
+            shopOtpRequested = shopOtpRequested,
         )
         return
     }
