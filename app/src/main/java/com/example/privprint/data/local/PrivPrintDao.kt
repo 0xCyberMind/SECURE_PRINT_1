@@ -49,6 +49,12 @@ interface PrivPrintDao {
     @Query("DELETE FROM printers WHERE id = :printerId")
     suspend fun deletePrinter(printerId: String)
 
+    @Query("UPDATE printers SET isDefault = 0 WHERE shopId = :shopId")
+    suspend fun clearDefaultPrinter(shopId: String)
+
+    @Query("UPDATE printers SET isDefault = 1 WHERE id = :printerId")
+    suspend fun setDefaultPrinter(printerId: String)
+
     // Sessions
     @Query("SELECT * FROM sessions WHERE status = 'ACTIVE' ORDER BY createdAt DESC LIMIT 1")
     fun getActiveSession(): Flow<SessionEntity?>

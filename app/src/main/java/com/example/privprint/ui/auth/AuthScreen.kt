@@ -77,7 +77,13 @@ fun AuthScreen(
     canCancel: Boolean = false,
     onCancel: () -> Unit = {},
     onLoginUser: (name: String, phone: String) -> Boolean,
+    onVerifyUserOtp: (code: String) -> Boolean,
+    onResetUserOtp: () -> Unit,
     onLoginShop: (shopId: String, shopName: String, operatorName: String, operatorPhone: String, pin: String) -> Boolean,
+    loginInProgress: Boolean = false,
+    loginError: String? = null,
+    userOtpRequested: Boolean = false,
+    developmentOtp: String? = null,
     modifier: Modifier = Modifier
 ) {
     // 0 = Customer Login, 1 = Xerox Shop Operator Login
@@ -187,6 +193,12 @@ fun AuthScreen(
             ) {
                 CustomerLoginForm(
                     onLogin = onLoginUser,
+                    onVerifyOtp = onVerifyUserOtp,
+                    onResetOtp = onResetUserOtp,
+                    loginInProgress = loginInProgress,
+                    loginError = loginError,
+                    otpRequested = userOtpRequested,
+                    developmentOtp = developmentOtp,
                     onSwitchToShop = { selectedTab = 1 }
                 )
             }
@@ -288,11 +300,18 @@ private fun RoleSegmentedTab(
 @Composable
 private fun CustomerLoginForm(
     onLogin: (name: String, phone: String) -> Boolean,
+    onVerifyOtp: (code: String) -> Boolean,
+    onResetOtp: () -> Unit,
+    loginInProgress: Boolean,
+    loginError: String?,
+    otpRequested: Boolean,
+    developmentOtp: String?,
     onSwitchToShop: () -> Unit
 ) {
     val focusManager = LocalFocusManager.current
     var name by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
+    var otp by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     PrivPrintCard(
@@ -319,30 +338,8 @@ private fun CustomerLoginForm(
                 )
             }
 
-            // Quick Fill demo chip
-            AssistChip(
-                onClick = {
-                    name = "Alex Johnson"
-                    phone = "+1 (555) 019-2834"
-                    errorMessage = null
-                },
-                label = { Text("Demo User: Alex Johnson • +1 555-0199", fontSize = 12.sp) },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                },
-                colors = AssistChipDefaults.assistChipColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-                    labelColor = MaterialTheme.colorScheme.primary
-                )
-            )
-
             // Name Field
-            OutlinedTextField(
+            if (!otpRequested) OutlinedTextField(
                 value = name,
                 onValueChange = {
                     name = it
@@ -373,14 +370,14 @@ private fun CustomerLoginForm(
             )
 
             // Mobile Phone Field
-            OutlinedTextField(
+            if (!otpRequested) OutlinedTextField(
                 value = phone,
                 onValueChange = {
                     phone = it
                     errorMessage = null
                 },
                 label = { Text("Mobile Phone Number") },
-                placeholder = { Text("e.g. +1 (555) 019-2834") },
+                placeholder = { Text("Include country code, e.g. +91 98765 43210") },
                 leadingIcon = {
                     Icon(
                         imageVector = Icons.Default.Phone,
@@ -413,9 +410,48 @@ private fun CustomerLoginForm(
                     .testTag("user_phone_input")
             )
 
-            if (errorMessage != null) {
+            if (otpRequested) {
                 Text(
-                    text = errorMessage!!,
+                    text = "Enter the 6-digit code sent to $phone.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (developmentOtp != null) {
+                    Text(
+                        text = "Development code: $developmentOtp",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                OutlinedTextField(
+                    value = otp,
+                    onValueChange = { value ->
+                        otp = value.filter { it.isDigit() }.take(6)
+                        errorMessage = null
+                    },
+                    label = { Text("Verification code") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            focusManager.clearFocus()
+                            onVerifyOtp(otp)
+                        }
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("user_otp_input")
+                )
+            }
+
+            val visibleError = errorMessage ?: loginError
+            if (visibleError != null) {
+                Text(
+                    text = visibleError,
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(horizontal = 4.dp)
@@ -440,7 +476,7 @@ private fun CustomerLoginForm(
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "Zero Cloud Footprint: Credentials stay local to pair your active device with printer counters.",
+                        text = "Your phone number is sent securely to PrivPrint to deliver and verify your sign-in code.",
                         fontSize = 11.sp,
                         color = Color(0xFF065F46),
                         lineHeight = 16.sp
@@ -450,13 +486,17 @@ private fun CustomerLoginForm(
 
             // Primary Action
             PrivPrintPrimaryButton(
-                text = "Continue to Print",
-                icon = Icons.Default.Print,
+                text = if (otpRequested) "Verify & Continue" else "Send verification code",
+                icon = if (otpRequested) Icons.Default.CheckCircle else Icons.Default.Print,
                 onClick = {
                     focusManager.clearFocus()
-                    if (name.isBlank() || phone.isBlank()) {
+                    if (otpRequested) {
+                        val success = onVerifyOtp(otp)
+                        if (!success) errorMessage = "Enter the 6-digit verification code."
+                    } else if (name.isBlank() || phone.isBlank()) {
                         errorMessage = "Please enter both your full name and mobile phone number."
                     } else {
+                        errorMessage = null
                         val success = onLogin(name, phone)
                         if (!success) {
                             errorMessage = "Invalid name or number. Please try again."
@@ -464,8 +504,24 @@ private fun CustomerLoginForm(
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
+                enabled = !loginInProgress,
+                isLoading = loginInProgress,
                 testTag = "user_login_submit_btn"
             )
+
+            if (otpRequested) {
+                TextButton(
+                    onClick = {
+                        otp = ""
+                        errorMessage = null
+                        onResetOtp()
+                    },
+                    enabled = !loginInProgress,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                ) {
+                    Text("Use a different phone number")
+                }
+            }
 
             // Bottom Switcher
             TextButton(

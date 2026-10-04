@@ -16,3 +16,24 @@
 local.properties
 .env
 debug.keystore
+
+# Keep backend secrets and generated artifacts out of source uploads.
+/server/.env.*
+!/server/.env.example
+**/build/
+**/.pytest_cache/
+**/__pycache__/
+**/.env
+**/.env.*
+!**/.env.example
+
+# Local credentials, test data, and diagnostic output.
+**/.secure_credentials.dat
+**/shop_station_config.json
+/.freebuff/
+/.vscode/
+/server/uploads/
+/test_otp.json
+/app_build_testresults_dump.txt
+/hs_err_pid*.log
+*.log

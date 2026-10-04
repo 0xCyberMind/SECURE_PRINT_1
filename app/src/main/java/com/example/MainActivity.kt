@@ -33,6 +33,7 @@ import com.example.privprint.ui.UserScreen
 import com.example.privprint.ui.auth.AuthScreen
 import com.example.privprint.ui.components.PrivPrintBottomNav
 import com.example.privprint.ui.components.PrivPrintNavigationRail
+import com.example.privprint.ui.components.PrivPrintShopNavigationRail
 import com.example.privprint.ui.components.PrivPrintTopBar
 import com.example.privprint.ui.shop.PermanentQrScreen
 import com.example.privprint.ui.shop.ShopAuditScreen
@@ -43,6 +44,7 @@ import com.example.privprint.ui.shop.ShopWindowsStationScreen
 import com.example.privprint.ui.user.ActiveTrackingScreen
 import com.example.privprint.ui.user.DocumentPickerScreen
 import com.example.privprint.ui.user.HistoryScreen
+import com.example.privprint.ui.user.NearbyShopsScreen
 import com.example.privprint.ui.user.PrintConfirmationScreen
 import com.example.privprint.ui.user.PrintSettingsScreen
 import com.example.privprint.ui.user.PrivacyCenterScreen
@@ -91,8 +93,14 @@ fun PrivPrintApp(viewModel: PrivPrintViewModel) {
     val publicStationUrl by viewModel.publicStationUrl.collectAsStateWithLifecycle()
     val isPublicTunnelEnabled by viewModel.isPublicTunnelEnabled.collectAsStateWithLifecycle()
     val autoPrintOnAccept by viewModel.autoPrintOnAccept.collectAsStateWithLifecycle()
+    val environmentMode by viewModel.environmentMode.collectAsStateWithLifecycle()
+    val nearbyShops by viewModel.nearbyShops.collectAsStateWithLifecycle()
 
     val pendingLoginRole by viewModel.pendingLoginRole.collectAsStateWithLifecycle()
+    val authLoginInProgress by viewModel.authLoginInProgress.collectAsStateWithLifecycle()
+    val authLoginError by viewModel.authLoginError.collectAsStateWithLifecycle()
+    val userOtpRequested by viewModel.userOtpRequested.collectAsStateWithLifecycle()
+    val developmentOtp by viewModel.developmentOtp.collectAsStateWithLifecycle()
     val canCancelLogin = currentUser != null || currentShopAuth != null
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -125,11 +133,21 @@ fun PrivPrintApp(viewModel: PrivPrintViewModel) {
             canCancel = canCancelLogin,
             onCancel = { viewModel.cancelLogin() },
             onLoginUser = { name, phone ->
-                viewModel.loginAsUser(name, phone)
+                viewModel.requestUserOtp(name, phone)
+            },
+            onVerifyUserOtp = { code ->
+                viewModel.verifyUserOtp(code)
+            },
+            onResetUserOtp = {
+                viewModel.resetUserOtp()
             },
             onLoginShop = { shopId, shopName, opName, opPhone, pin ->
                 viewModel.loginAsShop(shopId, shopName, opName, opPhone, pin)
-            }
+            },
+            loginInProgress = authLoginInProgress,
+            loginError = authLoginError,
+            userOtpRequested = userOtpRequested,
+            developmentOtp = developmentOtp
         )
         return
     }
@@ -138,11 +156,18 @@ fun PrivPrintApp(viewModel: PrivPrintViewModel) {
         val isWideScreen = maxWidth >= 640.dp
 
         Row(modifier = Modifier.fillMaxSize()) {
-            if (isWideScreen && currentMode == AppMode.USER) {
-                PrivPrintNavigationRail(
-                    currentScreen = userUiState.currentScreen,
-                    onNavigate = { viewModel.navigateToUserScreen(it) }
-                )
+            if (isWideScreen) {
+                if (currentMode == AppMode.USER) {
+                    PrivPrintNavigationRail(
+                        currentScreen = userUiState.currentScreen,
+                        onNavigate = { viewModel.navigateToUserScreen(it) }
+                    )
+                } else if (currentMode == AppMode.SHOP) {
+                    PrivPrintShopNavigationRail(
+                        currentScreen = shopUiState.currentScreen,
+                        onNavigate = { viewModel.navigateToShopScreen(it) }
+                    )
+                }
             }
 
             Scaffold(
@@ -193,6 +218,7 @@ fun PrivPrintApp(viewModel: PrivPrintViewModel) {
                                     UserScreen.PRINT_SETTINGS -> viewModel.navigateToUserScreen(UserScreen.DOCUMENT_PICKER)
                                     UserScreen.DOCUMENT_PICKER -> viewModel.navigateToUserScreen(UserScreen.SHOP_CONNECTED)
                                     UserScreen.SHOP_CONNECTED -> viewModel.navigateToUserScreen(UserScreen.HOME)
+                                    UserScreen.NEARBY_SHOPS -> viewModel.navigateToUserScreen(UserScreen.HOME)
                                     UserScreen.QR_SCANNER -> viewModel.navigateToUserScreen(UserScreen.HOME)
                                     UserScreen.ACTIVE_TRACKING -> viewModel.navigateToUserScreen(UserScreen.HOME)
                                     UserScreen.HISTORY -> viewModel.navigateToUserScreen(UserScreen.HOME)
@@ -215,6 +241,18 @@ fun PrivPrintApp(viewModel: PrivPrintViewModel) {
                                     onOpenLogin = { targetRole ->
                                         viewModel.openLogin(targetRole)
                                     }
+                                )
+
+                                UserScreen.NEARBY_SHOPS -> NearbyShopsScreen(
+                                    nearbyShops = nearbyShops,
+                                    onFetchNearbyShops = { lat, lng, radius ->
+                                        viewModel.fetchNearbyShops(lat, lng, radius)
+                                    },
+                                    onSelectNearbyShop = { shop ->
+                                        viewModel.selectNearbyShop(shop)
+                                    },
+                                    onNavigateToQrScanner = { viewModel.navigateToUserScreen(UserScreen.QR_SCANNER) },
+                                    onBack = { viewModel.navigateToUserScreen(UserScreen.HOME) }
                                 )
 
                                 UserScreen.QR_SCANNER -> QrScannerScreen(
@@ -311,6 +349,8 @@ fun PrivPrintApp(viewModel: PrivPrintViewModel) {
                                 UserScreen.SETTINGS -> SettingsScreen(
                                     currentTheme = themeMode,
                                     currentUser = currentUser,
+                                    environmentMode = environmentMode,
+                                    onEnvironmentChange = { viewModel.setEnvironmentMode(it) },
                                     onThemeChange = { viewModel.setThemeMode(it) },
                                     onSwitchToShopMode = { viewModel.setAppMode(AppMode.SHOP) },
                                     onResetSession = { viewModel.emergencyRevokeSession() },

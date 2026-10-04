@@ -30,6 +30,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import com.example.privprint.data.api.models.EnvironmentMode
+import com.example.privprint.data.api.models.NearbyShopDto
 import com.example.privprint.data.api.models.UserRole
 import com.example.privprint.data.auth.AuthTokenManager
 import kotlinx.coroutines.launch
@@ -59,6 +61,7 @@ data class AuthShop(
 
 enum class UserScreen {
     HOME,
+    NEARBY_SHOPS,
     QR_SCANNER,
     SHOP_CONNECTED,
     DOCUMENT_PICKER,
@@ -100,8 +103,8 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
     private val prefs = application.getSharedPreferences("privprint_preferences", Context.MODE_PRIVATE)
 
     private val db = PrivPrintDatabase.getInstance(application)
-    val repository = PrivPrintRepository(db.privPrintDao())
-    val authTokenManager = AuthTokenManager()
+    val authTokenManager = AuthTokenManager(application)
+    val repository = PrivPrintRepository(db.privPrintDao(), authTokenManager)
     val printerAdapter: PrinterInterface = AndroidPrintAdapter(application)
     val printEngine = PrintEngine(
         repository = repository,
@@ -160,6 +163,21 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _pendingLoginRole = MutableStateFlow<AppMode?>(null)
     val pendingLoginRole: StateFlow<AppMode?> = _pendingLoginRole.asStateFlow()
+
+    private val _authLoginInProgress = MutableStateFlow(false)
+    val authLoginInProgress: StateFlow<Boolean> = _authLoginInProgress.asStateFlow()
+
+    private val _authLoginError = MutableStateFlow<String?>(null)
+    val authLoginError: StateFlow<String?> = _authLoginError.asStateFlow()
+
+    private val _userOtpRequested = MutableStateFlow(false)
+    val userOtpRequested: StateFlow<Boolean> = _userOtpRequested.asStateFlow()
+
+    private val _developmentOtp = MutableStateFlow<String?>(null)
+    val developmentOtp: StateFlow<String?> = _developmentOtp.asStateFlow()
+
+    private var pendingUserName: String = ""
+    private var pendingUserPhone: String = ""
 
     private val _currentMode = MutableStateFlow(
         if (savedAuthState == AuthState.SHOP_LOGGED_IN) AppMode.SHOP else AppMode.USER
@@ -221,6 +239,53 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
     )
     val autoPrintOnAccept: StateFlow<Boolean> = _autoPrintOnAccept.asStateFlow()
 
+    private val _environmentMode = MutableStateFlow(
+        EnvironmentMode.valueOf(
+            prefs.getString("environment_mode", EnvironmentMode.PRODUCTION.name) ?: EnvironmentMode.PRODUCTION.name
+        )
+    )
+    val environmentMode: StateFlow<EnvironmentMode> = _environmentMode.asStateFlow()
+
+    fun setEnvironmentMode(mode: EnvironmentMode) {
+        _environmentMode.value = mode
+        prefs.edit().putString("environment_mode", mode.name).apply()
+        _userUiState.value = _userUiState.value.copy(
+            toastMessage = "Switched API Environment to ${mode.label}"
+        )
+    }
+
+    private val _nearbyShops = MutableStateFlow<List<NearbyShopDto>>(emptyList())
+    val nearbyShops: StateFlow<List<NearbyShopDto>> = _nearbyShops.asStateFlow()
+
+    fun fetchNearbyShops(lat: Double, lng: Double, radiusKm: Double = 25.0) {
+        viewModelScope.launch {
+            val list = repository.getNearbyShops(lat, lng, radiusKm)
+            _nearbyShops.value = list
+        }
+    }
+
+    fun selectNearbyShop(shopDto: NearbyShopDto) {
+        viewModelScope.launch {
+            val session = repository.createSession(shopDto.id, shopDto.name)
+            val domainShop = Shop(
+                id = shopDto.id,
+                name = shopDto.name,
+                address = shopDto.address,
+                permanentQrPayload = shopDto.permanentQrPayload,
+                isVerified = shopDto.isVerified,
+                isOnline = shopDto.isOnline,
+                supportedColor = shopDto.supportedColor,
+                supportedDuplex = shopDto.supportedDuplex,
+                queueCount = shopDto.activeQueueCount
+            )
+            repository.saveShop(domainShop)
+            _userUiState.value = _userUiState.value.copy(
+                selectedShop = domainShop,
+                currentScreen = UserScreen.SHOP_CONNECTED
+            )
+        }
+    }
+
     fun setAutoPrintOnAccept(enabled: Boolean) {
         _autoPrintOnAccept.value = enabled
         prefs.edit().putBoolean("auto_print_on_accept", enabled).apply()
@@ -234,6 +299,7 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
 
         viewModelScope.launch {
             repository.initializeSeedData()
+            fetchNearbyShops(23.0225, 72.5714)
         }
     }
 
@@ -243,37 +309,83 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
 
     // --- Authentication Actions ---
 
-    fun loginAsUser(name: String, phoneNumber: String): Boolean {
+    fun requestUserOtp(name: String, phoneNumber: String): Boolean {
         val trimmedName = name.trim()
         val trimmedPhone = phoneNumber.trim()
+        if (_authLoginInProgress.value) {
+            return true
+        }
         if (trimmedName.isBlank() || trimmedPhone.isBlank()) {
             return false
         }
 
-        // Authenticate with security token manager
-        authTokenManager.authenticate(
-            identity = trimmedPhone,
-            role = UserRole.USER
-        )
-
-        val user = AuthUser(name = trimmedName, phoneNumber = trimmedPhone)
-        _currentUser.value = user
-        _pendingLoginRole.value = null
-        _authState.value = AuthState.USER_LOGGED_IN
-        _currentMode.value = AppMode.USER
-        _userUiState.value = _userUiState.value.copy(
-            currentScreen = UserScreen.HOME,
-            toastMessage = "Welcome, $trimmedName! Secure session started."
-        )
-
-        // Persist session
-        prefs.edit()
-            .putString("auth_state", AuthState.USER_LOGGED_IN.name)
-            .putString("user_name", trimmedName)
-            .putString("user_phone", trimmedPhone)
-            .apply()
-
+        _authLoginError.value = null
+        _authLoginInProgress.value = true
+        pendingUserName = trimmedName
+        pendingUserPhone = trimmedPhone
+        viewModelScope.launch {
+            when (val result = repository.requestPhoneOtp(trimmedPhone)) {
+                is com.example.privprint.data.repository.PrivPrintRepository.OtpRequestResult.Sent -> {
+                    _authLoginInProgress.value = false
+                    _userOtpRequested.value = true
+                    _developmentOtp.value = result.response.developmentOtp
+                }
+                is com.example.privprint.data.repository.PrivPrintRepository.OtpRequestResult.Failure -> {
+                    _authLoginInProgress.value = false
+                    _authLoginError.value = "Could not send verification code: ${result.error}"
+                }
+            }
+        }
         return true
+    }
+
+    fun verifyUserOtp(otp: String): Boolean {
+        val code = otp.trim()
+        if (_authLoginInProgress.value) return true
+        if (code.length != 6 || !code.all { it.isDigit() }) {
+            _authLoginError.value = "Enter the 6-digit verification code."
+            return false
+        }
+
+        _authLoginError.value = null
+        _authLoginInProgress.value = true
+        viewModelScope.launch {
+            when (val result = repository.verifyPhoneOtp(pendingUserPhone, code)) {
+                is com.example.privprint.data.auth.AuthResult.Success -> {
+                    _authLoginInProgress.value = false
+                    _userOtpRequested.value = false
+                    _developmentOtp.value = null
+                    _currentUser.value = AuthUser(
+                        name = pendingUserName,
+                        phoneNumber = pendingUserPhone
+                    )
+                    _pendingLoginRole.value = null
+                    _authState.value = AuthState.USER_LOGGED_IN
+                    _currentMode.value = AppMode.USER
+                    _userUiState.value = _userUiState.value.copy(
+                        currentScreen = UserScreen.HOME,
+                        toastMessage = "Welcome, $pendingUserName! Secure session started."
+                    )
+                    prefs.edit()
+                        .putString("auth_state", AuthState.USER_LOGGED_IN.name)
+                        .putString("user_name", pendingUserName)
+                        .putString("user_phone", pendingUserPhone)
+                        .apply()
+                }
+                is com.example.privprint.data.auth.AuthResult.Failure -> {
+                    _authLoginInProgress.value = false
+                    _authLoginError.value = "Verification failed: ${result.error}"
+                }
+            }
+        }
+        return true
+    }
+
+    fun resetUserOtp() {
+        if (_authLoginInProgress.value) return
+        _userOtpRequested.value = false
+        _developmentOtp.value = null
+        _authLoginError.value = null
     }
 
     fun loginAsShop(
@@ -294,30 +406,34 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
         val trimmedShopId = shopId.trim().ifBlank { "SHOP-${System.currentTimeMillis().toString().takeLast(4)}" }
         val trimmedShopName = shopName.trim().ifBlank { "Xerox Print Station" }
 
-        // Authenticate with security token manager
-        authTokenManager.authenticate(
-            identity = trimmedOperator,
-            role = UserRole.SHOP_OPERATOR,
-            shopId = trimmedShopId
-        )
-
-        val shop = AuthShop(
-            shopId = trimmedShopId,
-            shopName = trimmedShopName,
-            operatorName = trimmedOperator,
-            operatorPhone = trimmedPhone
-        )
-        _currentShopAuth.value = shop
-        _pendingLoginRole.value = null
-        _authState.value = AuthState.SHOP_LOGGED_IN
-        _currentMode.value = AppMode.SHOP
-        _shopUiState.value = _shopUiState.value.copy(
-            currentScreen = ShopScreen.DASHBOARD,
-            statusNotice = "Shop Terminal Authenticated: $trimmedShopName"
-        )
-
-        // Save shop in database for counter permanent QR and persistence
         viewModelScope.launch {
+            val result = repository.loginWithPhoneOtp(
+                phoneNumber = trimmedPhone,
+                role = UserRole.SHOP_OPERATOR,
+                shopId = trimmedShopId
+            )
+            if (result !is com.example.privprint.data.auth.AuthResult.Success) {
+                _shopUiState.value = _shopUiState.value.copy(
+                    statusNotice = "Shop login failed. Use development OTP 123456."
+                )
+                return@launch
+            }
+
+            val shop = AuthShop(
+                shopId = trimmedShopId,
+                shopName = trimmedShopName,
+                operatorName = trimmedOperator,
+                operatorPhone = trimmedPhone
+            )
+            _currentShopAuth.value = shop
+            _pendingLoginRole.value = null
+            _authState.value = AuthState.SHOP_LOGGED_IN
+            _currentMode.value = AppMode.SHOP
+            _shopUiState.value = _shopUiState.value.copy(
+                currentScreen = ShopScreen.DASHBOARD,
+                statusNotice = "Shop Terminal Authenticated: $trimmedShopName"
+            )
+
             val shopDomain = Shop(
                 id = trimmedShopId,
                 name = trimmedShopName,

@@ -12,13 +12,18 @@ import com.example.privprint.data.api.models.InitUploadResponse
 import com.example.privprint.data.api.models.JobResponse
 import com.example.privprint.data.api.models.LoginRequest
 import com.example.privprint.data.api.models.LoginResponse
+import com.example.privprint.data.api.models.NearbyShopDto
+import com.example.privprint.data.api.models.OtpRequestResponse
+import com.example.privprint.data.api.models.PhoneOtpRequest
+import com.example.privprint.data.api.models.PhoneOtpVerifyRequest
 import com.example.privprint.data.api.models.PermanentQrResponse
+import com.example.privprint.data.api.models.PrinterDto
 import com.example.privprint.data.api.models.RefreshTokenRequest
 import com.example.privprint.data.api.models.RevokeSessionRequest
 import com.example.privprint.data.api.models.SessionResponse
 import com.example.privprint.data.api.models.ShopDto
+import com.example.privprint.data.api.models.TokenResponse
 import com.example.privprint.data.api.models.TokenRevocationRequest
-import com.example.privprint.data.local.PrinterEntity
 import okhttp3.RequestBody
 import okhttp3.ResponseBody
 import retrofit2.Response
@@ -45,10 +50,25 @@ interface PrivPrintApiService {
         @Body request: LoginRequest
     ): Response<LoginResponse>
 
+    @POST("api/v1/auth/phone/request-otp")
+    suspend fun requestPhoneOtp(
+        @Body request: PhoneOtpRequest
+    ): Response<OtpRequestResponse>
+
+    @POST("api/v1/auth/phone/verify-otp")
+    suspend fun verifyPhoneOtp(
+        @Body request: PhoneOtpVerifyRequest
+    ): Response<TokenResponse>
+
     @POST("api/v1/auth/refresh")
     suspend fun refreshToken(
         @Body request: RefreshTokenRequest
     ): Response<LoginResponse>
+
+    @POST("api/v1/auth/refresh")
+    fun refreshTokenSync(
+        @Body request: RefreshTokenRequest
+    ): retrofit2.Call<LoginResponse>
 
     @POST("api/v1/auth/logout")
     suspend fun logout(
@@ -65,6 +85,13 @@ interface PrivPrintApiService {
     @GET("api/v1/shops")
     suspend fun getShops(): Response<List<ShopDto>>
 
+    @GET("api/v1/shops/nearby")
+    suspend fun getNearbyShops(
+        @Query("lat") lat: Double,
+        @Query("lng") lng: Double,
+        @Query("radius") radiusKm: Double = 10.0
+    ): Response<List<NearbyShopDto>>
+
     @GET("api/v1/shops/{id}")
     suspend fun getShopById(
         @Path("id") shopId: String
@@ -78,7 +105,7 @@ interface PrivPrintApiService {
     @GET("api/v1/shops/{id}/printers")
     suspend fun getShopPrinters(
         @Path("id") shopId: String
-    ): Response<List<PrinterEntity>>
+    ): Response<List<PrinterDto>>
 
     // Ephemeral Sessions (Pairing)
     @POST("api/v1/sessions")
@@ -186,4 +213,17 @@ interface PrivPrintApiService {
         @Header("Authorization") bearerToken: String,
         @Path("jobId") jobId: String
     ): Response<CleanupStatusDto>
+
+    companion object {
+        fun create(baseUrl: String = "http://10.0.2.2:8000/"): PrivPrintApiService {
+            val moshi = com.squareup.moshi.Moshi.Builder()
+                .add(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
+                .build()
+            val retrofit = retrofit2.Retrofit.Builder()
+                .baseUrl(baseUrl)
+                .addConverterFactory(retrofit2.converter.moshi.MoshiConverterFactory.create(moshi))
+                .build()
+            return retrofit.create(PrivPrintApiService::class.java)
+        }
+    }
 }

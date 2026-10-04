@@ -5,6 +5,8 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.os.Handler
+import android.os.Looper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -60,11 +62,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -76,6 +80,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.camera.core.Camera
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
 import com.example.privprint.data.model.Shop
 import com.example.privprint.ui.components.CornerRadiusButton
 import com.example.privprint.ui.components.CornerRadiusCard
@@ -84,9 +95,11 @@ import com.example.privprint.ui.components.PrivPrintErrorState
 import com.example.privprint.ui.components.PrivPrintOutlinedButton
 import com.example.privprint.ui.components.PrivPrintPrimaryButton
 import com.google.zxing.BinaryBitmap
+import com.google.zxing.PlanarYUVLuminanceSource
 import com.google.zxing.MultiFormatReader
 import com.google.zxing.RGBLuminanceSource
 import com.google.zxing.common.HybridBinarizer
+import java.util.concurrent.Executors
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -111,6 +124,9 @@ fun QrScannerScreen(
 
     var isFlashOn by remember { mutableStateOf(false) }
     var localDecodeError by remember { mutableStateOf<String?>(null) }
+    var camera by remember { mutableStateOf<Camera?>(null) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -147,6 +163,17 @@ fun QrScannerScreen(
     LaunchedEffect(Unit) {
         if (!hasCameraPermission) {
             permissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    LaunchedEffect(isFlashOn, camera) {
+        camera?.cameraControl?.enableTorch(isFlashOn)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            cameraExecutor.shutdown()
+            camera?.cameraControl?.enableTorch(false)
         }
     }
 
@@ -235,6 +262,68 @@ fun QrScannerScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
+                    if (hasCameraPermission) {
+                        AndroidView(
+                            factory = { viewContext ->
+                                PreviewView(viewContext).also { previewView ->
+                                    val cameraProviderFuture = ProcessCameraProvider.getInstance(viewContext)
+                                    cameraProviderFuture.addListener({
+                                        val cameraProvider = cameraProviderFuture.get()
+                                        val preview = Preview.Builder().build().also {
+                                            it.surfaceProvider = previewView.surfaceProvider
+                                        }
+                                        val imageAnalysis = ImageAnalysis.Builder()
+                                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                                            .build()
+                                        imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
+                                            val image = imageProxy.image
+                                            if (image == null) {
+                                                imageProxy.close()
+                                                return@setAnalyzer
+                                            }
+
+                                            try {
+                                                val plane = image.planes[0]
+                                                val buffer = plane.buffer
+                                                val bytes = ByteArray(buffer.remaining())
+                                                buffer.get(bytes)
+                                                val source = PlanarYUVLuminanceSource(
+                                                    bytes,
+                                                    plane.rowStride,
+                                                    image.height,
+                                                    0,
+                                                    0,
+                                                    plane.rowStride,
+                                                    image.height,
+                                                    false
+                                                )
+                                                val result = MultiFormatReader().decode(
+                                                    BinaryBitmap(HybridBinarizer(source))
+                                                )
+                                                Handler(Looper.getMainLooper()).post {
+                                                    onQrScanned(result.text)
+                                                }
+                                            } catch (_: Exception) {
+                                                // Most frames do not contain a QR code.
+                                            } finally {
+                                                imageProxy.close()
+                                            }
+                                        }
+
+                                        cameraProvider.unbindAll()
+                                        camera = cameraProvider.bindToLifecycle(
+                                            lifecycleOwner,
+                                            CameraSelector.DEFAULT_BACK_CAMERA,
+                                            preview,
+                                            imageAnalysis
+                                        )
+                                    }, ContextCompat.getMainExecutor(viewContext))
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+
                     // QR Frame
                     Box(
                         modifier = Modifier

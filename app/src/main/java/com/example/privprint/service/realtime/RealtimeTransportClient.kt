@@ -1,5 +1,6 @@
 package com.example.privprint.service.realtime
 
+import com.example.privprint.data.api.ApiClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -9,7 +10,13 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.min
 
 enum class RealtimeEventType {
     SESSION_CREATED,
@@ -38,7 +45,7 @@ data class RealtimeEvent(
     val eventId: String,
     val sequenceNumber: Long,
     val eventType: RealtimeEventType,
-    val targetChannel: String, // e.g. "user:USER-123" or "shop:SHOP-101"
+    val targetChannel: String,
     val jobId: String? = null,
     val sessionId: String? = null,
     val shopId: String? = null,
@@ -55,10 +62,8 @@ sealed class ConnectionState {
 }
 
 /**
- * Enterprise Realtime Transport Client.
- * Implements cross-device bi-directional event stream with authenticated subscriptions,
- * automatic reconnect with exponential backoff, heartbeat (ping/pong), event deduplication,
- * and strict channel isolation to prevent cross-user data leakage.
+ * Enterprise Realtime Transport Client with OkHttp WebSocket integration,
+ * exponential reconnect backoff, heartbeat management, and channel resubscription.
  */
 class RealtimeTransportClient(
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.Default)
@@ -72,22 +77,117 @@ class RealtimeTransportClient(
     private val seenEventIds = ConcurrentHashMap.newKeySet<String>()
     private var currentChannel: String? = null
     private var authToken: String? = null
-    private var isConnected = false
+    @Volatile private var isConnected = false
+    private var webSocket: WebSocket? = null
     private var heartbeatJob: Job? = null
     private var reconnectJob: Job? = null
+    private var reconnectAttempt = 0
 
     fun connect(channel: String, token: String) {
         if (isConnected && currentChannel == channel) return
         this.currentChannel = channel
         this.authToken = token
+        this.isConnected = true
+        this.reconnectAttempt = 0
 
         scope.launch {
             _connectionState.emit(ConnectionState.Connecting)
-            // Perform authenticated handshake simulation / verification
-            delay(150)
-            isConnected = true
-            _connectionState.emit(ConnectionState.Connected(channel))
-            startHeartbeat()
+            startWebSocketConnection(channel, token)
+        }
+    }
+
+    private fun startWebSocketConnection(channel: String, token: String) {
+        val wsUrl = ApiClient.DEFAULT_BASE_URL.replace("http://", "ws://").replace("https://", "wss://") + "api/v1/realtime/ws?token=$token"
+
+        val request = Request.Builder()
+            .url(wsUrl)
+            .build()
+
+        webSocket = ApiClient.okHttpClient.newWebSocket(request, object : WebSocketListener() {
+            override fun onOpen(ws: WebSocket, response: Response) {
+                reconnectAttempt = 0
+                scope.launch {
+                    _connectionState.emit(ConnectionState.Connected(channel))
+                    // Send subscription request
+                    val subMsg = JSONObject().apply {
+                        put("type", "subscribe")
+                        put("channel", channel)
+                    }.toString()
+                    ws.send(subMsg)
+                    startHeartbeat()
+                }
+            }
+
+            override fun onMessage(ws: WebSocket, text: String) {
+                try {
+                    val json = JSONObject(text)
+                    val msgType = json.optString("type")
+
+                    if (msgType == "event") {
+                        val evtId = json.optString("event_id", "evt_${System.currentTimeMillis()}")
+                        val evtName = json.optString("event", "JOB_CREATED")
+                        val evtChannel = json.optString("channel", channel)
+                        val dataObj = json.optJSONObject("data") ?: JSONObject()
+
+                        val mappedType = try {
+                            RealtimeEventType.valueOf(evtName)
+                        } catch (e: Exception) {
+                            RealtimeEventType.JOB_CREATED
+                        }
+
+                        val evt = RealtimeEvent(
+                            eventId = evtId,
+                            sequenceNumber = System.currentTimeMillis(),
+                            eventType = mappedType,
+                            targetChannel = evtChannel,
+                            jobId = dataObj.optString("job_id", null),
+                            sessionId = dataObj.optString("session_id", null),
+                            shopId = dataObj.optString("shop_id", null),
+                            payloadJson = dataObj.toString()
+                        )
+
+                        scope.launch { publishEvent(evt) }
+                    } else if (msgType == "error") {
+                        val code = json.optString("code")
+                        if (code == "TOKEN_EXPIRED") {
+                            disconnect()
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Ignore malformed frames
+                }
+            }
+
+            override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
+                handleDisconnectOrFailure(t.message ?: "WebSocket failure")
+            }
+
+            override fun onClosed(ws: WebSocket, code: Int, reason: String) {
+                handleDisconnectOrFailure("Closed: $reason")
+            }
+        })
+    }
+
+    private fun handleDisconnectOrFailure(reason: String) {
+        heartbeatJob?.cancel()
+        if (!isConnected || authToken.isNullOrEmpty() || currentChannel.isNullOrEmpty()) {
+            scope.launch { _connectionState.emit(ConnectionState.Disconnected) }
+            return
+        }
+
+        reconnectAttempt++
+        val delayMs = min(1000L * (1 shl min(reconnectAttempt, 5)), 30_000L)
+
+        scope.launch {
+            _connectionState.emit(ConnectionState.Reconnecting(reconnectAttempt, delayMs))
+        }
+
+        reconnectJob?.cancel()
+        reconnectJob = scope.launch {
+            delay(delayMs)
+            if (isConnected && !authToken.isNullOrEmpty() && !currentChannel.isNullOrEmpty()) {
+                startWebSocketConnection(currentChannel!!, authToken!!)
+            }
         }
     }
 
@@ -95,6 +195,8 @@ class RealtimeTransportClient(
         isConnected = false
         heartbeatJob?.cancel()
         reconnectJob?.cancel()
+        webSocket?.close(1000, "Client disconnected")
+        webSocket = null
         currentChannel = null
         authToken = null
         scope.launch {
@@ -102,19 +204,12 @@ class RealtimeTransportClient(
         }
     }
 
-    /**
-     * Publishes an event to a target channel with deduplication.
-     */
     suspend fun publishEvent(event: RealtimeEvent) {
-        // Enforce channel isolation: only dispatch if targeted to matching channel or broadcast
         if (seenEventIds.add(event.eventId)) {
             _events.emit(event)
         }
     }
 
-    /**
-     * Helper for dispatching progress from real print service to user.
-     */
     suspend fun emitPrintProgress(
         jobId: String,
         shopId: String,
@@ -140,14 +235,8 @@ class RealtimeTransportClient(
         heartbeatJob?.cancel()
         heartbeatJob = scope.launch {
             while (isActive && isConnected) {
-                delay(30_000) // 30s ping
-                val ping = RealtimeEvent(
-                    eventId = "ping-${System.currentTimeMillis()}",
-                    sequenceNumber = System.currentTimeMillis(),
-                    eventType = RealtimeEventType.HEARTBEAT_PING,
-                    targetChannel = currentChannel ?: "system"
-                )
-                publishEvent(ping)
+                delay(20_000)
+                webSocket?.send(JSONObject().apply { put("type", "ping") }.toString())
             }
         }
     }

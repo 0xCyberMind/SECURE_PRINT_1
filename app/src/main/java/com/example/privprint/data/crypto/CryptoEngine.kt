@@ -74,6 +74,15 @@ object CryptoEngine {
     }
 
     /**
+     * Computes the full 64-character lowercase SHA-256 hex digest of a payload.
+     * Sent to the backend as `sha256_hash` for ciphertext integrity validation.
+     */
+    fun computeSha256Hex(bytes: ByteArray): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        return digest.digest(bytes).joinToString("") { "%02x".format(it) }
+    }
+
+    /**
      * Encrypts document bytes using AES-256-GCM with a fresh random IV.
      */
     fun encryptDocument(

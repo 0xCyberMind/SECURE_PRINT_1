@@ -27,11 +27,10 @@ class ApiContractTest {
         assertEquals("v1", health.apiVersion)
 
         val loginReq = LoginRequest(
-            identity = "shop_operator_1",
-            role = UserRole.SHOP_OPERATOR,
-            secret = "pass_hash_secure"
+            email = "shop_operator_1@privprint.com",
+            password = "pass_hash_secure"
         )
-        assertEquals(UserRole.SHOP_OPERATOR, loginReq.role)
+        assertEquals("shop_operator_1@privprint.com", loginReq.email)
 
         val sessionReq = CreateSessionRequest(
             shopId = "SHOP-101",
@@ -43,45 +42,44 @@ class ApiContractTest {
         val uploadReq = InitUploadRequest(
             sessionId = "SES-100",
             filename = "Confidential.pdf",
+            fileSizeBytes = 4096,
             mimeType = "application/pdf",
-            ciphertextSizeBytes = 4096,
-            sha256Checksum = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-            ivHex = "0102030405060708090a0b0c"
+            sha256Hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            ivHex = "0102030405060708090a0b0c",
+            keyFingerprint = "FINGERPRINT_AES",
+            copiesAuthorized = 2
         )
         assertEquals("application/pdf", uploadReq.mimeType)
+        assertEquals(4096, uploadReq.fileSizeBytes)
 
         val jobReq = CreateJobRequest(
-            sessionId = "SES-100",
             shopId = "SHOP-101",
-            storageObjectId = "OBJ-123",
-            documentName = "Confidential.pdf",
+            sessionId = "SES-100",
+            documentId = "DOC-123",
             pageCount = 4,
-            copiesAuthorized = 2,
-            colorMode = ColorMode.BLACK_AND_WHITE,
-            paperSize = PaperSize.A4,
-            orientation = com.example.privprint.data.model.Orientation.PORTRAIT,
-            duplexMode = DuplexMode.SINGLE_SIDED,
-            ivHex = "0102030405060708090a0b0c",
-            keyFingerprint = "FINGERPRINT_AES"
+            requestedCopies = 2,
+            colorMode = "MONOCHROME",
+            paperSize = PaperSize.A4.name,
+            orientation = com.example.privprint.data.model.Orientation.PORTRAIT.name,
+            duplexMode = "SIMPLEX"
         )
-        assertEquals(2, jobReq.copiesAuthorized)
+        assertEquals(2, jobReq.requestedCopies)
 
+        // Server JobResponse (snake_case JSON) with client compatibility aliases
         val jobResp = JobResponse(
-            jobId = "PRV-2026-ABC",
-            sessionId = "SES-100",
+            id = "PRV-2026-ABC",
             shopId = "SHOP-101",
-            shopName = "Apex Print",
-            documentName = "Confidential.pdf",
+            sessionId = "SES-100",
+            documentId = "DOC-456",
             pageCount = 4,
-            copiesAuthorized = 2,
-            copiesPrinted = 0,
-            status = PrintJobStatus.QUEUED,
-            cleanupState = CleanupState.CLEANUP_PENDING,
-            createdAt = System.currentTimeMillis(),
-            expiresAt = System.currentTimeMillis() + 900_000
+            requestedCopies = 2,
+            completedCopies = 0,
+            status = PrintJobStatus.QUEUED.name
         )
         assertEquals("PRV-2026-ABC", jobResp.jobId)
-        assertEquals(CleanupState.CLEANUP_PENDING, jobResp.cleanupState)
+        assertEquals(2, jobResp.copiesAuthorized)
+        assertEquals(0, jobResp.copiesPrinted)
+        assertEquals("QUEUED", jobResp.status)
     }
 
     @Test

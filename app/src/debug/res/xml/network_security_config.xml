@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- DEBUG BUILDS ONLY. Release builds keep cleartext disabled (HTTPS-only).
+         This list must contain the host running the PrivPrint API:
+           - 10.0.2.2        : Android emulator alias for the host laptop
+           - localhost/127.1 : direct device loops
+           - 10.49.14.50     : this laptop's Wi-Fi LAN IP (update after router changes:
+                               ipconfig -> "Wireless LAN adapter Wi-Fi" -> IPv4 Address) -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+        <domain includeSubdomains="true">10.49.14.50</domain>
+    </domain-config>
+</network-security-config>
