@@ -7,7 +7,7 @@ from app.repositories.user_repo import UserRepository
 
 
 @pytest.mark.asyncio
-async def test_shop_registration_is_hidden_until_admin_approval(
+async def test_shop_registration_is_active_without_granting_admin_access(
     client: TestClient,
     db_session,
 ):
@@ -35,15 +35,15 @@ async def test_shop_registration_is_hidden_until_admin_approval(
     )
     assert created.status_code == 201, created.text
     shop = created.json()
-    assert shop["status"] == "PENDING_APPROVAL"
-    assert shop["is_verified"] is False
+    assert shop["status"] == "ACTIVE"
+    assert shop["is_verified"] is True
     assert shop["is_online"] is False
 
     nearby = client.get(
         "/api/v1/shops/nearby?latitude=23.0225&longitude=72.5714&radius=10.0"
     )
     assert nearby.status_code == 200
-    assert all(item["id"] != shop["id"] for item in nearby.json())
+    assert any(item["id"] == shop["id"] for item in nearby.json())
 
     operator_approval = client.post(
         f"/api/v1/shops/{shop['id']}/approve",

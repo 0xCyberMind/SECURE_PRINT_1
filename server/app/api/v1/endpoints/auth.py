@@ -215,6 +215,12 @@ async def verify_phone_otp(
         # Auto-create shop for SHOP_OPERATOR if not already associated
         shop_id = payload.shop_id or f"shop_{secrets.token_urlsafe(12)}"
         shop = await db.get(Shop, shop_id) if payload.shop_id else None
+        if shop and shop.owner_id != user.id:
+            raise PrivPrintException(
+                status_code=status.HTTP_409_CONFLICT,
+                code=ErrorCode.CONFLICT,
+                message="Shop is already associated with another operator",
+            )
         if not shop:
             shop = Shop(
                 id=shop_id,
@@ -222,12 +228,15 @@ async def verify_phone_otp(
                 owner_id=user.id,
                 address="Address pending registration",
                 permanent_qr_payload=f"privprint://shop?id={shop_id}",
-                status="PENDING_APPROVAL",
-                is_verified=False,
+                status="ACTIVE",
+                is_verified=True,
                 is_online=False,
             )
             db.add(shop)
-            await db.flush()  # Ensure shop is created before proceeding
+            await db.flush()
+        else:
+            shop.status = "ACTIVE"
+            shop.is_verified = True
 
     access_token = create_access_token(subject=user.id, role=user.role)
     refresh_token_str, refresh_jti, refresh_exp = create_refresh_token(

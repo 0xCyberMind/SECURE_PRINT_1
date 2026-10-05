@@ -79,7 +79,11 @@ def test_shop_operator_otp_uses_same_twilio_provider(
     async def start_verification(phone_number: str) -> None:
         sent_requests.append(phone_number)
 
+    async def check_verification(phone_number: str, code: str) -> bool:
+        return code == "654321"
+
     monkeypatch.setattr(twilio_verify, "start_verification", start_verification)
+    monkeypatch.setattr(twilio_verify, "check_verification", check_verification)
 
     response = client.post(
         "/api/v1/auth/phone/request-otp",
@@ -93,3 +97,29 @@ def test_shop_operator_otp_uses_same_twilio_provider(
     assert response.status_code == 200, response.text
     assert response.json()["development_otp"] is None
     assert sent_requests == ["+919876543210"]
+
+    verification = client.post(
+        "/api/v1/auth/phone/verify-otp",
+        json={
+            "phone_number": "+919876543210",
+            "otp": "654321",
+            "role": "SHOP_OPERATOR",
+            "shop_id": "SHOP-TEST",
+        },
+    )
+    assert verification.status_code == 200, verification.text
+    operator_headers = {
+        "Authorization": f"Bearer {verification.json()['access_token']}"
+    }
+
+    shop = client.get("/api/v1/shops/SHOP-TEST")
+    assert shop.status_code == 200, shop.text
+    assert shop.json()["status"] == "ACTIVE"
+    assert shop.json()["is_verified"] is True
+
+    keys = client.get(
+        "/api/v1/shops/SHOP-TEST/print-keys",
+        headers=operator_headers,
+    )
+    assert keys.status_code == 200, keys.text
+    assert keys.json() == []
