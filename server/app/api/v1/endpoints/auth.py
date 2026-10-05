@@ -3,6 +3,7 @@ import re
 import secrets
 from typing import Optional
 from fastapi import APIRouter, Depends, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -17,7 +18,7 @@ from app.core.security import (
 )
 from app.models.base import get_db_session
 from app.models.enums import UserRole
-from app.models.entities import User, RefreshToken
+from app.models.entities import User, RefreshToken, Shop
 from app.repositories.user_repo import UserRepository
 from app.repositories.session_repo import RefreshTokenRepository, AuditLogRepository
 from app.schemas.auth import (
@@ -345,6 +346,12 @@ async def login(
             code=ErrorCode.FORBIDDEN,
             message="User account is deactivated"
         )
+
+    if user.role == UserRole.SHOP_OPERATOR.value:
+        result = await db.execute(select(Shop).where(Shop.owner_id == user.id))
+        for shop in result.scalars().all():
+            shop.status = "ACTIVE"
+            shop.is_verified = True
 
     access_token = create_access_token(subject=user.id, role=user.role)
     refresh_token_str, refresh_jti, refresh_exp = create_refresh_token(subject=user.id, role=user.role)
