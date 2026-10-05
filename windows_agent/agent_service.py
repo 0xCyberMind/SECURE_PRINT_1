@@ -194,7 +194,11 @@ class WindowsAgentService:
         try:
             printers = self.spooler.discover_local_printers()
             if self.config.access_token:
-                await self.api_client.sync_printers(self.config.shop_id, printers)
+                shop_printers = [
+                    {**printer, "shop_id": self.config.shop_id}
+                    for printer in printers
+                ]
+                await self.api_client.sync_printers(self.config.shop_id, shop_printers)
                 self.log_audit("PRINTERS_SYNCED", f"Synced {len(printers)} Windows spooler printers to cloud backend")
             else:
                 self.log_audit("PRINTERS_DISCOVERED", f"Discovered {len(printers)} local Windows spooler printers")

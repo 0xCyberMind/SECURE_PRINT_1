@@ -400,3 +400,25 @@ async def test_shop_connection_fails_if_station_key_cannot_register(agent_config
 
     assert service.encryption_key_registered is False
     service._start_authenticated_tasks.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_discovered_printer_sync_includes_required_shop_id(agent_config):
+    service = WindowsAgentService(agent_config)
+    service.config.access_token = "station-access-token"
+    printers = [{
+        "id": "PRN-LOCAL-01",
+        "name": "Local Xerox",
+        "model": "Xerox Model",
+        "status": "READY",
+    }]
+    service.spooler.discover_local_printers = lambda: printers
+    service.api_client.sync_printers = AsyncMock(return_value=[])
+
+    await service.sync_discovered_printers()
+
+    service.api_client.sync_printers.assert_awaited_once_with(
+        agent_config.shop_id,
+        [{**printers[0], "shop_id": agent_config.shop_id}],
+    )
+    assert service.audit_log[-1]["eventType"] == "PRINTERS_SYNCED"
