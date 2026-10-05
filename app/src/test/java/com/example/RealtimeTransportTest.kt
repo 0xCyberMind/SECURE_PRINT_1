@@ -14,14 +14,19 @@ import org.junit.Test
 class RealtimeTransportTest {
 
     @Test
-    fun testRealtimeClientConnectionAndEventDispatch() = runBlocking {
+    fun testRealtimeClientDoesNotConnectWithoutFreshAuthentication() = runBlocking {
         val client = RealtimeTransportClient()
 
         client.connect("user:SES-123", "token_test_abc")
-        val state = client.connectionState.first { it is ConnectionState.Connected }
-        assertTrue(state is ConnectionState.Connected)
-        assertEquals("user:SES-123", (state as ConnectionState.Connected).channel)
+        val state = client.connectionState.first { it is ConnectionState.Error }
+        assertTrue(state is ConnectionState.Error)
 
+        client.disconnect()
+    }
+
+    @Test
+    fun testRealtimeEventDispatch() = runBlocking {
+        val client = RealtimeTransportClient()
         val receivedEvents = mutableListOf<RealtimeEvent>()
         val collector = launch {
             client.events.collect { event ->

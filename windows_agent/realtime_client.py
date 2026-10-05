@@ -47,6 +47,7 @@ class WindowsAgentRealtimeClient:
         self.reconnect_attempts = 0
         self.last_heartbeat_sent = 0.0
         self.last_heartbeat_ack = 0.0
+        self.last_error: Optional[str] = None
         self._processed_events: OrderedDict[str, float] = OrderedDict()  # event_id -> timestamp
         self._max_event_cache_size = 1000
         self._event_cache_ttl_sec = 3600.0  # 1 hour
@@ -92,6 +93,7 @@ class WindowsAgentRealtimeClient:
                 ws_url = self._get_ws_url()
                 if not self.config.access_token:
                     self.state = ConnectionState.ERROR
+                    self.last_error = "Station is not authenticated."
                     logger.warning("Realtime connection paused: station is not authenticated.")
                     return
 
@@ -107,6 +109,7 @@ class WindowsAgentRealtimeClient:
                 ) as ws:
                     self.websocket = ws
                     self.state = ConnectionState.CONNECTED
+                    self.last_error = None
                     self.reconnect_attempts = 0
                     self.last_heartbeat_ack = time.time()
                     logger.info("Outbound WSS Connected successfully.")
@@ -141,6 +144,7 @@ class WindowsAgentRealtimeClient:
             except Exception as e:
                 self.state = ConnectionState.ERROR
                 self.websocket = None
+                self.last_error = f"{type(e).__name__}: {e}"
                 self.reconnect_attempts += 1
                 delay = self._calculate_backoff_delay()
                 logger.warning(

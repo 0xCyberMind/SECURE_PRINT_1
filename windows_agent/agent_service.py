@@ -1,7 +1,9 @@
 import asyncio
 import base64
 import hashlib
+import json
 import logging
+import time
 from urllib.parse import unquote
 from typing import List, Dict, Any, Optional
 from cryptography.hazmat.primitives import hashes, serialization
@@ -52,6 +54,8 @@ class WindowsAgentService:
         )
         self.is_running = False
         self._background_tasks_started = False
+        self._realtime_task: Optional[asyncio.Task] = None
+        self._token_refresh_lock = asyncio.Lock()
         self._operator_token: Optional[str] = None
         self._pending_operator_shops: Dict[str, str] = {}
         self.active_jobs: Dict[str, Dict[str, Any]] = {}
@@ -139,6 +143,59 @@ class WindowsAgentService:
             station_private_key_pem=self._station_private_key_pem(),
         )
 
+    @staticmethod
+    def _access_token_expires_soon(token: Optional[str], margin_seconds: int = 180) -> bool:
+        if not token:
+            return True
+        try:
+            payload = token.split(".")[1]
+            payload += "=" * (-len(payload) % 4)
+            claims = json.loads(base64.urlsafe_b64decode(payload).decode("utf-8"))
+            expires_at = float(claims["exp"])
+            return expires_at <= time.time() + margin_seconds
+        except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return True
+
+    async def _refresh_station_auth(self) -> None:
+        async with self._token_refresh_lock:
+            if not self._access_token_expires_soon(self.config.access_token):
+                return
+            if not self.config.device_id or not self.config.api_key:
+                raise RuntimeError("Station device credentials are unavailable; sign in to the Xerox shop again.")
+
+            refreshed = False
+            if self.config.refresh_token:
+                try:
+                    await self.api_client.refresh_auth_tokens()
+                    refreshed = True
+                except Exception as refresh_error:
+                    self.log_audit(
+                        "TOKEN_REFRESH_FAILED",
+                        f"Refresh token rejected; requesting a new station token: {refresh_error}",
+                        severity="WARNING",
+                    )
+
+            if not refreshed:
+                await self.api_client.authenticate_device(self.config.device_id, self.config.api_key)
+
+            self.config.access_token = self.api_client.access_token
+            self.config.refresh_token = self.api_client.refresh_token
+            if not self.config.access_token or not self.config.refresh_token:
+                raise RuntimeError("Backend did not return a complete station token pair.")
+
+            self.secure_store.store_credentials(
+                device_id=self.config.device_id,
+                api_key=self.config.api_key,
+                access_token=self.config.access_token,
+                refresh_token=self.config.refresh_token,
+                shop_id=self.config.shop_id,
+                station_private_key_pem=self._station_private_key_pem(),
+            )
+            self.log_audit(
+                "TOKEN_REFRESHED" if refreshed else "DEVICE_REAUTHENTICATED",
+                "Station authentication token renewed successfully",
+            )
+
     async def register_or_authenticate(self, operator_token: Optional[str] = None):
         """
         Step 1 & 2 of Station Auth Lifecycle.
@@ -171,23 +228,8 @@ class WindowsAgentService:
                 self.log_audit("DEVICE_AUTHENTICATED", f"Authenticated as PRINT_DEVICE: {self.config.device_id}")
             except Exception as e:
                 self.log_audit("AUTH_ERROR", f"Device registration/auth error: {e}", severity="WARNING")
-        else:
-            # Refresh if token might be expiring
-            try:
-                if self.config.refresh_token:
-                    auth_info = await self.api_client.refresh_auth_tokens()
-                    self.secure_store.store_credentials(
-                        device_id=self.config.device_id,
-                        api_key=self.config.api_key,
-                        access_token=auth_info.get("accessToken"),
-                        refresh_token=auth_info.get("refreshToken"),
-                        shop_id=self.config.shop_id,
-                        station_private_key_pem=self._station_private_key_pem(),
-                    )
-                    self.config.save()
-                    self.log_audit("TOKEN_REFRESHED", "Successfully refreshed JWT access token")
-            except Exception as e:
-                logger.debug(f"Token refresh check: {e}")
+        elif self._access_token_expires_soon(self.config.access_token):
+            await self._refresh_station_auth()
         await self._register_print_key()
 
     async def sync_discovered_printers(self):
@@ -314,7 +356,20 @@ class WindowsAgentService:
         self._background_tasks_started = True
         asyncio.create_task(self._heartbeat_rest_loop())
         asyncio.create_task(self.poll_queue_loop())
-        asyncio.create_task(self.realtime_client.start())
+        self._realtime_task = asyncio.create_task(self.realtime_client.start())
+
+    async def reconnect_realtime(self) -> None:
+        if not self.config.access_token or not self.config.shop_id:
+            raise RuntimeError("Connect this station to a Xerox shop before reconnecting.")
+
+        if self._realtime_task and not self._realtime_task.done():
+            self.realtime_client.stop()
+            self._realtime_task.cancel()
+            await asyncio.gather(self._realtime_task, return_exceptions=True)
+
+        self.realtime_client.last_error = None
+        self._realtime_task = asyncio.create_task(self.realtime_client.start())
+        self.log_audit("REALTIME_RECONNECT_REQUESTED", "Manual cloud connection retry requested")
 
     async def reconcile_on_reconnect(self):
         """
@@ -534,6 +589,8 @@ class WindowsAgentService:
         while self.is_running:
             try:
                 if self.config.access_token and self.config.device_id:
+                    if self._access_token_expires_soon(self.config.access_token):
+                        await self._refresh_station_auth()
                     if not self.encryption_key_registered:
                         try:
                             await self._register_print_key()
@@ -541,7 +598,7 @@ class WindowsAgentService:
                             logger.warning("Station print-key registration retry failed: %s", e)
                     await self.api_client.send_heartbeat(self.config.device_id)
             except Exception as e:
-                logger.debug(f"REST Heartbeat note: {e}")
+                self.log_audit("REST_HEARTBEAT_ERROR", f"Station heartbeat or token refresh failed: {e}", severity="WARNING")
             await asyncio.sleep(self.config.heartbeat_interval_sec)
 
     async def poll_queue_loop(self):

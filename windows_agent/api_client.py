@@ -21,12 +21,24 @@ class WindowsAgentApiClient:
             return
         message = None
         try:
-            message = response.json().get("error", {}).get("message")
-        except (ValueError, AttributeError):
+            body = response.json()
+            if isinstance(body, dict):
+                error = body.get("error")
+                if isinstance(error, dict):
+                    message = error.get("message")
+                elif isinstance(error, str):
+                    message = error
+                message = message or body.get("detail") or body.get("message")
+                if isinstance(message, list):
+                    message = "; ".join(
+                        str(item.get("msg", item)) if isinstance(item, dict) else str(item)
+                        for item in message
+                    )
+        except (ValueError, TypeError):
             pass
         if not message:
             message = f"Request failed (HTTP {response.status_code})"
-        raise RuntimeError(message)
+        raise RuntimeError(str(message))
 
     async def login_operator(self, email: str, password: str) -> Dict[str, Any]:
         url = f"{self.base_url}/api/v1/auth/login"
@@ -164,7 +176,7 @@ class WindowsAgentApiClient:
         url = f"{self.base_url}/api/v1/print/jobs?shopId={shop_id}"
         async with httpx.AsyncClient(timeout=10.0) as client:
             res = await client.get(url, headers=self._headers())
-            res.raise_for_status()
+            self._raise_for_response(res)
             return res.json()
 
     async def start_printing(self, job_id: str) -> Dict[str, Any]:
@@ -247,7 +259,7 @@ class WindowsAgentApiClient:
         payload = {"refresh_token": self.refresh_token}
         async with httpx.AsyncClient(timeout=10.0) as client:
             res = await client.post(url, json=payload)
-            res.raise_for_status()
+            self._raise_for_response(res)
             data = res.json()
             self.access_token = data.get("accessToken") or data.get("access_token")
             self.refresh_token = data.get("refreshToken") or data.get("refresh_token")

@@ -1,7 +1,7 @@
 import math
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import PrivPrintException, ErrorCode
@@ -41,6 +41,7 @@ async def get_shop_print_keys(
             Device.shop_id == shop_id,
             Device.is_active.is_(True),
             Device.encryption_public_key.isnot(None),
+            Device.encryption_public_key != "",
         )
     )
     return [
@@ -136,6 +137,13 @@ async def get_nearby_shops(
         .where(
             Shop.status == "ACTIVE",
             Shop.is_verified == True,
+            Shop.devices.any(
+                and_(
+                    Device.is_active.is_(True),
+                    Device.encryption_public_key.isnot(None),
+                    Device.encryption_public_key != "",
+                )
+            ),
             Shop.latitude.isnot(None),
             Shop.longitude.isnot(None)
         )

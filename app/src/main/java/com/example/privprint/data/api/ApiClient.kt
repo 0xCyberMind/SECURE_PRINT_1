@@ -12,9 +12,12 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.Route
 import okhttp3.logging.HttpLoggingInterceptor
+import org.json.JSONObject
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 object ApiClient {
 
@@ -32,6 +35,66 @@ object ApiClient {
     fun init(tokenManager: AuthTokenManager, baseUrl: String = DEFAULT_BASE_URL) {
         this.tokenManager = tokenManager
         this.baseUrl = baseUrl
+    }
+
+    suspend fun getFreshRealtimeAccessToken(): String? = withContext(Dispatchers.IO) {
+        val tm = tokenManager ?: return@withContext null
+        val currentToken = tm.getAccessToken() ?: return@withContext null
+        if (!tokenExpiresWithin(currentToken, 120)) return@withContext currentToken
+
+        synchronized(tokenAuthenticator) {
+            val latestToken = tm.getAccessToken() ?: return@synchronized null
+            if (!tokenExpiresWithin(latestToken, 120)) return@synchronized latestToken
+
+            val refreshToken = tm.getRefreshToken() ?: return@synchronized null
+            try {
+                val refreshService = Retrofit.Builder()
+                    .baseUrl(baseUrl)
+                    .addConverterFactory(MoshiConverterFactory.create(moshi))
+                    .build()
+                    .create(PrivPrintApiService::class.java)
+                val response = refreshService.refreshTokenSync(RefreshTokenRequest(refreshToken)).execute()
+                val body = response.body()
+                if (response.isSuccessful && body != null) {
+                    tm.updateTokens(body.accessToken, body.refreshToken)
+                    body.accessToken
+                } else {
+                    if (response.code() == 401) tm.clearSession()
+                    if (!tokenExpired(latestToken)) latestToken else null
+                }
+            } catch (exception: Exception) {
+                android.util.Log.w("PrivPrintAuth", "Could not refresh auth before realtime reconnect", exception)
+                if (!tokenExpired(latestToken)) latestToken else null
+            }
+        }
+    }
+
+    private fun tokenExpiresWithin(token: String, seconds: Long): Boolean {
+        val expiration = tokenExpirationEpochSeconds(token) ?: return true
+        return expiration <= System.currentTimeMillis() / 1000 + seconds
+    }
+
+    private fun tokenExpired(token: String): Boolean {
+        val expiration = tokenExpirationEpochSeconds(token) ?: return true
+        return expiration <= System.currentTimeMillis() / 1000
+    }
+
+    private fun tokenExpirationEpochSeconds(token: String): Long? {
+        return try {
+            val encodedPayload = token.split('.').getOrNull(1) ?: return null
+            val payload = String(
+                android.util.Base64.decode(
+                    encodedPayload,
+                    android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP,
+                ),
+                Charsets.UTF_8,
+            )
+            JSONObject(payload).optLong("exp").takeIf { it > 0 }
+        } catch (_: IllegalArgumentException) {
+            null
+        } catch (_: org.json.JSONException) {
+            null
+        }
     }
 
     private val authInterceptor = Interceptor { chain ->

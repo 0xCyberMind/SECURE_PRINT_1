@@ -13,8 +13,8 @@ try {
         --noconfirm `
         --clean `
         --onefile `
-        --console `
-        --name PrivPrintWindowsStation `
+        --noconsole `
+        --name PrivPrintStationWorker `
         --paths $repoRoot `
         --distpath $distDir `
         --workpath $workDir `
@@ -32,12 +32,12 @@ try {
     Copy-Item (Join-Path $agentDir "shop_station_config.example.json") $distDir -Force
     Copy-Item (Join-Path $agentDir "README.md") $distDir -Force
     Compress-Archive `
-        -LiteralPath (Join-Path $distDir "PrivPrintWindowsStation.exe"), (Join-Path $distDir "shop_station_config.example.json"), (Join-Path $distDir "README.md") `
-        -DestinationPath (Join-Path $distDir "PrivPrintWindowsStation.zip") `
+        -LiteralPath (Join-Path $distDir "PrivPrintStationWorker.exe"), (Join-Path $distDir "shop_station_config.example.json"), (Join-Path $distDir "README.md") `
+        -DestinationPath (Join-Path $distDir "PrivPrintStationWorker.zip") `
         -Force
-    Write-Output "Created standalone executable: $(Join-Path $distDir 'PrivPrintWindowsStation.exe')"
+    Write-Output "Created station worker: $(Join-Path $distDir 'PrivPrintStationWorker.exe')"
     Write-Output "Sample configuration: $(Join-Path $distDir 'shop_station_config.example.json')"
-    Write-Output "Download bundle: $(Join-Path $distDir 'PrivPrintWindowsStation.zip')"
+    Write-Output "Download bundle: $(Join-Path $distDir 'PrivPrintStationWorker.zip')"
 }
 finally {
     Pop-Location

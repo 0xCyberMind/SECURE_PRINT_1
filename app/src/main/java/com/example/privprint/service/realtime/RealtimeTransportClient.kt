@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
@@ -92,8 +93,28 @@ class RealtimeTransportClient(
 
         scope.launch {
             _connectionState.emit(ConnectionState.Connecting)
-            startWebSocketConnection(channel, token)
+            connectWithFreshToken(channel)
         }
+    }
+
+    private suspend fun connectWithFreshToken(channel: String) {
+        val currentToken = withContext(Dispatchers.IO) {
+            ApiClient.getFreshRealtimeAccessToken()
+        }
+
+        if (!isConnected || currentChannel != channel) return
+        if (currentToken.isNullOrBlank()) {
+            isConnected = false
+            scope.launch {
+                _connectionState.emit(
+                    ConnectionState.Error("Your session expired. Sign in again to reconnect securely.")
+                )
+            }
+            return
+        }
+
+        authToken = currentToken
+        startWebSocketConnection(channel, currentToken)
     }
 
     private fun startWebSocketConnection(channel: String, token: String) {
@@ -186,7 +207,7 @@ class RealtimeTransportClient(
         reconnectJob = scope.launch {
             delay(delayMs)
             if (isConnected && !authToken.isNullOrEmpty() && !currentChannel.isNullOrEmpty()) {
-                startWebSocketConnection(currentChannel!!, authToken!!)
+                connectWithFreshToken(currentChannel!!)
             }
         }
     }

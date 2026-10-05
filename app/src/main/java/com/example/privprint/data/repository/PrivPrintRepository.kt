@@ -559,12 +559,7 @@ class PrivPrintRepository(
     }
 
     private fun defaultShopNameFor(shopId: String): String {
-        return when (shopId.uppercase()) {
-            "SHOP-101" -> "Apex Campus Xerox & Print"
-            "SHOP-102" -> "Metro Secure QuickPrint"
-            "SHOP-103" -> "City Hall Documentation Desk"
-            else -> "PrivPrint Verified Xerox ($shopId)"
-        }
+        return "PrivPrint Shop ($shopId)"
     }
 
     /**
@@ -585,39 +580,41 @@ class PrivPrintRepository(
         }
     }
 
+    suspend fun getShopPrintKeys(shopId: String): List<StationPrintKeyDto> {
+        val token = authTokenManager.getAccessToken()
+            ?: throw IOException("Sign in before connecting to a print shop.")
+        return requireApiBody(
+            ApiClient.apiService.getShopPrintKeys(
+                bearerToken = "Bearer $token",
+                shopId = shopId
+            ),
+            "Checking Windows station setup for shop $shopId"
+        )
+    }
+
     /**
      * Initiates a verified temporary session with the Xerox shop via `/api/v1/sessions`.
      */
     suspend fun createSession(shopId: String, shopName: String): PrintSession {
-        dao.revokeAllActiveSessions()
-
-        val token = authTokenManager.getAccessToken() ?: ""
+        val token = authTokenManager.getAccessToken()
+            ?: throw IOException("Sign in before connecting to a print shop.")
         val nonce = UUID.randomUUID().toString()
 
-        var apiSessionId: String? = null
-        var expiresAt: Long = System.currentTimeMillis() + (15 * 60 * 1000)
-
-        if (token.isNotEmpty()) {
-            try {
-                val res = ApiClient.apiService.createSession(
-                    bearerToken = "Bearer $token",
-                    request = CreateSessionRequest(
-                        shopId = shopId,
-                        pairingNonce = nonce,
-                        clientFingerprint = "android_secure_enclave"
-                    )
+        val sessionResponse = requireApiBody(
+            ApiClient.apiService.createSession(
+                bearerToken = "Bearer $token",
+                request = CreateSessionRequest(
+                    shopId = shopId,
+                    pairingNonce = nonce,
+                    clientFingerprint = "android_secure_enclave"
                 )
-                if (res.isSuccessful && res.body() != null) {
-                    val body = res.body()!!
-                    apiSessionId = body.id
-                    parseIsoToMillis(body.expiresAt)?.let { expiresAt = it }
-                }
-            } catch (e: Exception) {
-                // Fallback to local session if offline
-            }
-        }
-
-        val sessionId = apiSessionId ?: ("SES-" + UUID.randomUUID().toString().take(8).uppercase())
+            ),
+            "Connecting to print shop $shopId"
+        )
+        val sessionId = sessionResponse.id
+        val expiresAt = parseIsoToMillis(sessionResponse.expiresAt)
+            ?: System.currentTimeMillis() + (15 * 60 * 1000)
+        dao.revokeAllActiveSessions()
         val now = System.currentTimeMillis()
 
         val sessionEntity = SessionEntity(
@@ -671,14 +668,11 @@ class PrivPrintRepository(
         val now = System.currentTimeMillis()
         val token = authTokenManager.getAccessToken()
             ?: throw IOException("Sign in before uploading a document to a print station.")
-        val stationKeys = requireApiBody(
-            ApiClient.apiService.getShopPrintKeys("Bearer $token", session.shopId),
-            "Loading secure print station keys"
-        )
+        val stationKeys = getShopPrintKeys(session.shopId)
         if (stationKeys.isEmpty()) {
             throw IOException(
-                "This shop's Windows station has not registered its encryption key. " +
-                    "Open the updated Windows station app, connect it to this shop, and retry."
+                "Shop ${session.shopId} has no Windows station encryption key registered. " +
+                    "Ask the shop to connect its Windows station before sending a file."
             )
         }
 

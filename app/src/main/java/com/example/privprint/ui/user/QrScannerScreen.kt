@@ -57,7 +57,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -87,7 +86,6 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
-import com.example.privprint.data.model.Shop
 import com.example.privprint.ui.components.CornerRadiusButton
 import com.example.privprint.ui.components.CornerRadiusCard
 import com.example.privprint.ui.components.PrivPrintCard
@@ -394,7 +392,7 @@ fun QrScannerScreen(
                 )
             }
 
-            // Secondary Options: Select Photo with QR or Quick Demo Connect
+            // Secondary Options
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -418,53 +416,6 @@ fun QrScannerScreen(
                 )
             }
 
-            // Quick Connect Demo Shops
-            PrivPrintCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "Or tap a shop counter to pair instantly:",
-                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        SuggestionChip(
-                            onClick = {
-                                onQrScanned(Shop.createQrPayload("SHOP-101", "Apex Campus Xerox & Print"))
-                            },
-                            label = { Text("Apex Campus Xerox", fontSize = 12.sp) },
-                            icon = {
-                                Icon(
-                                    imageVector = Icons.Default.QrCode,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-
-                        SuggestionChip(
-                            onClick = {
-                                onQrScanned(Shop.createQrPayload("SHOP-102", "Central Library Xerox Hub"))
-                            },
-                            label = { Text("Central Library Hub", fontSize = 12.sp) },
-                            icon = {
-                                Icon(
-                                    imageVector = Icons.Default.QrCode,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-            }
-
             // Manual Code Input
             PrivPrintCard(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
@@ -482,7 +433,7 @@ fun QrScannerScreen(
                         OutlinedTextField(
                             value = manualCodeInput,
                             onValueChange = onManualCodeChange,
-                            placeholder = { Text("e.g. SHOP-101", fontSize = 13.sp) },
+                            placeholder = { Text("Enter the shop ID shown with its QR code", fontSize = 13.sp) },
                             singleLine = true,
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier

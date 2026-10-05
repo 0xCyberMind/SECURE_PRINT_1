@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import sys
 from typing import Dict, Any
 from pydantic import BaseModel, Field
 from fastapi import FastAPI, HTTPException
@@ -453,13 +454,59 @@ async def get_status_api():
         "shop_id": agent_service.config.shop_id,
         "server_base_url": agent_service.config.server_base_url,
         "device_id": agent_service.config.device_id,
+        "worker_executable": os.path.abspath(sys.executable),
         "encryption_key_registered": agent_service.encryption_key_registered,
         "is_wss_connected": agent_service.realtime_client.is_connected,
+        "connection_state": agent_service.connection_state.value,
+        "connection_error": agent_service.realtime_client.last_error,
         "printers": printers,
         "active_jobs": agent_service.active_jobs,
         "job_history": agent_service.job_history,
         "audit_log": agent_service.audit_log
     })
+
+
+@dashboard_app.get("/api/queue")
+async def get_queue_api():
+    if not agent_service:
+        raise HTTPException(status_code=503, detail="Windows station service is starting.")
+    if not agent_service.config.access_token or not agent_service.config.shop_id:
+        raise HTTPException(status_code=401, detail="Connect this station to a Xerox shop first.")
+    try:
+        return await agent_service.api_client.get_print_queue(agent_service.config.shop_id)
+    except Exception as exc:
+        agent_service.log_audit("QUEUE_FETCH_ERROR", str(exc), severity="ERROR")
+        raise HTTPException(status_code=502, detail=f"Could not load the shop print queue: {exc}") from exc
+
+
+@dashboard_app.post("/api/printers/refresh")
+async def refresh_printers_api():
+    if not agent_service:
+        raise HTTPException(status_code=503, detail="Windows station service is starting.")
+    if not agent_service.config.access_token or not agent_service.config.shop_id:
+        raise HTTPException(status_code=401, detail="Connect this station to a Xerox shop first.")
+    try:
+        printers = agent_service.spooler.discover_local_printers()
+        synced = await agent_service.api_client.sync_printers(
+            agent_service.config.shop_id,
+            [{**printer, "shop_id": agent_service.config.shop_id} for printer in printers],
+        )
+        agent_service.log_audit("PRINTERS_SYNCED", f"Synced {len(printers)} Windows printers to the cloud backend")
+        return {"printers": printers, "synced_count": len(synced)}
+    except Exception as exc:
+        agent_service.log_audit("PRINTER_SYNC_ERROR", str(exc), severity="ERROR")
+        raise HTTPException(status_code=502, detail=f"Could not sync Windows printers to the cloud: {exc}") from exc
+
+
+@dashboard_app.post("/api/realtime/reconnect")
+async def reconnect_realtime_api():
+    if not agent_service:
+        raise HTTPException(status_code=503, detail="Windows station service is starting.")
+    try:
+        await agent_service.reconnect_realtime()
+        return {"status": "reconnecting"}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 class OperatorLoginRequest(BaseModel):

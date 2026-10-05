@@ -53,7 +53,7 @@ async def test_shop_registration_is_active_without_granting_admin_access(
         "/api/v1/shops/nearby?latitude=23.0225&longitude=72.5714&radius=10.0"
     )
     assert nearby.status_code == 200
-    assert any(item["id"] == shop["id"] for item in nearby.json())
+    assert not any(item["id"] == shop["id"] for item in nearby.json())
 
     operator_approval = client.post(
         f"/api/v1/shops/{shop['id']}/approve",
@@ -83,7 +83,7 @@ async def test_shop_registration_is_active_without_granting_admin_access(
     nearby_after_approval = client.get(
         "/api/v1/shops/nearby?latitude=23.0225&longitude=72.5714&radius=10.0"
     )
-    assert any(item["id"] == shop["id"] for item in nearby_after_approval.json())
+    assert not any(item["id"] == shop["id"] for item in nearby_after_approval.json())
 
 
 @pytest.mark.asyncio

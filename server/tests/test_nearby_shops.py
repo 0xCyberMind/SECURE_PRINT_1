@@ -1,6 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from app.core.security import create_access_token, get_password_hash
+from app.models.entities import Device
 from app.models.enums import UserRole
 from app.repositories.user_repo import UserRepository
 
@@ -32,6 +33,15 @@ async def test_nearby_and_distant_shops_discovery(client: TestClient, db_session
     )
     assert nearby_res.status_code == 201
     nearby_shop = nearby_res.json()
+    db_session.add(
+        Device(
+            id="dev_nearby_ready",
+            shop_id=nearby_shop["id"],
+            name="Ready Windows Station",
+            encryption_public_key="registered-public-key",
+        )
+    )
+    await db_session.commit()
 
     # 2. Create a Distant Shop (in Mumbai: approx 440 km away)
     distant_res = client.post(
@@ -64,6 +74,24 @@ async def test_nearby_and_distant_shops_discovery(client: TestClient, db_session
 
     # Distant shop must NOT be returned within 10 km
     assert not any(s["shop_id"] == distant_shop["id"] for s in shops)
+
+    unpaired_res = client.post(
+        "/api/v1/shops",
+        json={
+            "name": "Nearby Shop Without Station",
+            "address": "Station not configured",
+            "latitude": 23.0230,
+            "longitude": 72.5720,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert unpaired_res.status_code == 201
+    unpaired_shop = unpaired_res.json()
+    refreshed = client.get(
+        "/api/v1/shops/nearby?latitude=23.0225&longitude=72.5714&radius=10.0"
+    )
+    assert refreshed.status_code == 200
+    assert not any(s["shop_id"] == unpaired_shop["id"] for s in refreshed.json())
 
     # 4. Security Hygiene: Never expose private shop/device/owner data
     for s in shops:

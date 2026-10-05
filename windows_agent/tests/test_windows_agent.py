@@ -4,6 +4,8 @@ import pytest
 import asyncio
 import base64
 import hashlib
+import time
+import httpx
 from unittest.mock import AsyncMock
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -12,6 +14,7 @@ from windows_agent.config import AgentConfig
 from windows_agent.secure_store import SecureCredentialStore
 from windows_agent.printer_spooler import PrinterSpoolerManager
 from windows_agent.agent_service import WindowsAgentService
+from windows_agent.api_client import WindowsAgentApiClient
 from windows_agent.realtime_client import WindowsAgentRealtimeClient, ConnectionState
 from windows_agent.dashboard import dashboard_app, init_dashboard
 from fastapi.testclient import TestClient
@@ -50,6 +53,23 @@ def test_realtime_url_never_puts_access_token_in_query():
     client = WindowsAgentRealtimeClient(config)
     assert client._get_ws_url() == "wss://secure-print-1.onrender.com/api/v1/realtime/ws"
     assert "test-access-token" not in client._get_ws_url()
+
+
+def _test_token_with_expiration(expires_at):
+    payload = base64.urlsafe_b64encode(
+        json.dumps({"exp": expires_at}).encode("utf-8")
+    ).decode("ascii").rstrip("=")
+    return f"header.{payload}.signature"
+
+
+def test_station_access_token_expiry_detection():
+    assert WindowsAgentService._access_token_expires_soon(
+        _test_token_with_expiration(time.time() + 60)
+    )
+    assert not WindowsAgentService._access_token_expires_soon(
+        _test_token_with_expiration(time.time() + 600)
+    )
+    assert WindowsAgentService._access_token_expires_soon("malformed-token")
 
 
 @pytest.mark.asyncio
@@ -260,6 +280,114 @@ def test_dashboard_api_status(agent_config):
     assert "audit_log" in data
     assert data["authenticated"] is False
     assert data["server_base_url"] == agent_config.server_base_url
+
+
+def test_dashboard_queue_api_returns_cloud_jobs(agent_config):
+    service = WindowsAgentService(agent_config)
+    service.config.access_token = "station-token"
+    service.api_client.get_print_queue = AsyncMock(return_value=[{"id": "PRV-123", "status": "AUTHORIZED"}])
+    init_dashboard(service)
+
+    response = TestClient(dashboard_app).get("/api/queue")
+
+    assert response.status_code == 200
+    assert response.json() == [{"id": "PRV-123", "status": "AUTHORIZED"}]
+    service.api_client.get_print_queue.assert_awaited_once_with(agent_config.shop_id)
+
+
+def test_dashboard_queue_api_reports_backend_failure(agent_config):
+    service = WindowsAgentService(agent_config)
+    service.config.access_token = "station-token"
+    service.api_client.get_print_queue = AsyncMock(side_effect=RuntimeError("backend unavailable"))
+    init_dashboard(service)
+
+    response = TestClient(dashboard_app).get("/api/queue")
+
+    assert response.status_code == 502
+    assert "backend unavailable" in response.json()["detail"]
+
+
+def test_dashboard_printer_refresh_syncs_to_cloud(agent_config):
+    service = WindowsAgentService(agent_config)
+    service.config.access_token = "station-token"
+    service.spooler.discover_local_printers = lambda: [{"id": "WIN-PRN-1", "name": "Xerox", "status": "ONLINE"}]
+    service.api_client.sync_printers = AsyncMock(return_value=[{"id": "WIN-PRN-1"}])
+    init_dashboard(service)
+
+    response = TestClient(dashboard_app).post("/api/printers/refresh")
+
+    assert response.status_code == 200
+    assert response.json()["synced_count"] == 1
+    service.api_client.sync_printers.assert_awaited_once_with(
+        agent_config.shop_id,
+        [{"id": "WIN-PRN-1", "name": "Xerox", "status": "ONLINE", "shop_id": agent_config.shop_id}],
+    )
+
+
+def test_dashboard_realtime_reconnect_route(agent_config):
+    service = WindowsAgentService(agent_config)
+    service.reconnect_realtime = AsyncMock()
+    init_dashboard(service)
+
+    response = TestClient(dashboard_app).post("/api/realtime/reconnect")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "reconnecting"}
+    service.reconnect_realtime.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_service_realtime_reconnect_replaces_running_task(agent_config):
+    service = WindowsAgentService(agent_config)
+    service.config.access_token = "station-token"
+    service.realtime_client.start = AsyncMock()
+    previous_task = asyncio.create_task(asyncio.sleep(60))
+    service._realtime_task = previous_task
+
+    await service.reconnect_realtime()
+    await asyncio.sleep(0)
+
+    assert previous_task.cancelled()
+    assert service._realtime_task is not previous_task
+    service._realtime_task.cancel()
+    await asyncio.gather(service._realtime_task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_expired_station_token_falls_back_to_device_auth(agent_config, monkeypatch):
+    service = WindowsAgentService(agent_config)
+    monkeypatch.setattr(service.secure_store, "retrieve_credentials", lambda: None)
+    monkeypatch.setattr(service.secure_store, "store_credentials", lambda **kwargs: None)
+    await service.initialize()
+    service.config.device_id = "dev_win_test"
+    service.config.api_key = "device-key"
+    service.config.access_token = "expired-access-token"
+    service.config.refresh_token = "expired-refresh-token"
+    service.api_client.refresh_token = "expired-refresh-token"
+    service.api_client.refresh_auth_tokens = AsyncMock(side_effect=RuntimeError("refresh token expired"))
+    async def authenticate_station(device_id, api_key):
+        service.api_client.access_token = _test_token_with_expiration(time.time() + 900)
+        service.api_client.refresh_token = "rotated-refresh-token"
+
+    service.api_client.authenticate_device = AsyncMock(side_effect=authenticate_station)
+    service.api_client.register_device_print_key = AsyncMock()
+
+    await service.register_or_authenticate()
+
+    service.api_client.authenticate_device.assert_awaited_once_with("dev_win_test", "device-key")
+    assert service.config.refresh_token == "rotated-refresh-token"
+    assert service.config.access_token == service.api_client.access_token
+    assert service.encryption_key_registered is True
+
+
+def test_api_client_surfaces_backend_error_message(agent_config):
+    response = httpx.Response(
+        500,
+        json={"error": {"code": "INTERNAL_SERVER_ERROR", "message": "Printer sync failed"}},
+    )
+
+    with pytest.raises(RuntimeError, match="Printer sync failed"):
+        WindowsAgentApiClient._raise_for_response(response)
 
 
 def test_dashboard_email_password_setup_routes(agent_config):

@@ -1,14 +1,29 @@
 import asyncio
 import logging
+import os
 import webbrowser
 import uvicorn
+from logging.handlers import RotatingFileHandler
 from windows_agent.config import AgentConfig
 from windows_agent.agent_service import WindowsAgentService
 from windows_agent.dashboard import dashboard_app, init_dashboard
 
+log_directory = os.path.join(
+    os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
+    "PrivPrintStation",
+)
+os.makedirs(log_directory, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        RotatingFileHandler(
+            os.path.join(log_directory, "station.log"),
+            maxBytes=2 * 1024 * 1024,
+            backupCount=3,
+            encoding="utf-8",
+        )
+    ],
 )
 logger = logging.getLogger("WindowsAgentMain")
 
@@ -39,12 +54,13 @@ async def main():
     )
     server = uvicorn.Server(uvicorn_config)
 
-    async def open_dashboard_when_ready():
-        while not server.started:
-            await asyncio.sleep(0.1)
-        webbrowser.open(dashboard_url)
+    if os.environ.get("PRIVPRINT_OPEN_DASHBOARD", "1") != "0":
+        async def open_dashboard_when_ready():
+            while not server.started:
+                await asyncio.sleep(0.1)
+            webbrowser.open(dashboard_url)
 
-    asyncio.create_task(open_dashboard_when_ready())
+        asyncio.create_task(open_dashboard_when_ready())
     await server.serve()
 
 if __name__ == "__main__":

@@ -25,3 +25,4 @@ dependencyResolutionManagement {
 rootProject.name = "PrivPrint"
 
 include(":app")
+include(":windowsApp")

@@ -36,6 +36,7 @@ import com.example.privprint.data.api.models.UserRole
 import com.example.privprint.data.auth.AuthTokenManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import java.io.IOException
 
 enum class AppMode {
     USER,
@@ -266,24 +267,49 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun selectNearbyShop(shopDto: NearbyShopDto) {
+        val domainShop = Shop(
+            id = shopDto.id,
+            name = shopDto.name,
+            address = shopDto.address,
+            permanentQrPayload = shopDto.permanentQrPayload,
+            isVerified = shopDto.isVerified,
+            isOnline = shopDto.isOnline,
+            supportedColor = shopDto.supportedColor,
+            supportedDuplex = shopDto.supportedDuplex,
+            queueCount = shopDto.activeQueueCount
+        )
+        connectToReadyShop(domainShop)
+    }
+
+    private fun connectToReadyShop(shop: Shop, qrPayload: String? = null) {
         viewModelScope.launch {
-            val session = repository.createSession(shopDto.id, shopDto.name)
-            val domainShop = Shop(
-                id = shopDto.id,
-                name = shopDto.name,
-                address = shopDto.address,
-                permanentQrPayload = shopDto.permanentQrPayload,
-                isVerified = shopDto.isVerified,
-                isOnline = shopDto.isOnline,
-                supportedColor = shopDto.supportedColor,
-                supportedDuplex = shopDto.supportedDuplex,
-                queueCount = shopDto.activeQueueCount
-            )
-            repository.saveShop(domainShop)
-            _userUiState.value = _userUiState.value.copy(
-                selectedShop = domainShop,
-                currentScreen = UserScreen.SHOP_CONNECTED
-            )
+            try {
+                if (repository.getShopPrintKeys(shop.id).isEmpty()) {
+                    throw IOException(
+                        "No Windows station encryption key is registered for this shop yet."
+                    )
+                }
+                repository.createSession(shop.id, shop.name)
+                val connectedShop = if (qrPayload == null) {
+                    shop
+                } else {
+                    shop.copy(permanentQrPayload = qrPayload)
+                }
+                repository.saveShop(connectedShop)
+                _userUiState.value = _userUiState.value.copy(
+                    selectedShop = connectedShop,
+                    scannerError = null,
+                    toastMessage = null,
+                    currentScreen = UserScreen.SHOP_CONNECTED
+                )
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                val message = "Shop ${shop.id}: ${e.message ?: "Windows station is not ready."}"
+                _userUiState.value = _userUiState.value.copy(
+                    scannerError = message,
+                    toastMessage = message
+                )
+            }
         }
     }
 
@@ -595,23 +621,16 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
         val parsed = repository.parseShopQrPayload(qrPayload)
         if (parsed != null) {
             val (shopId, shopName) = parsed
-            viewModelScope.launch {
-                val session = repository.createSession(shopId, shopName)
-                val matchingShop = allShops.value.find { it.id == shopId }
-                    ?: Shop(
-                        id = shopId,
-                        name = shopName,
-                        address = "Verified Xerox Partner",
-                        permanentQrPayload = qrPayload,
-                        isVerified = true,
-                        isOnline = true
-                    )
-                _userUiState.value = _userUiState.value.copy(
-                    selectedShop = matchingShop,
-                    scannerError = null,
-                    currentScreen = UserScreen.SHOP_CONNECTED
+            val matchingShop = allShops.value.find { it.id == shopId }
+                ?: Shop(
+                    id = shopId,
+                    name = shopName,
+                    address = "Verified Xerox Partner",
+                    permanentQrPayload = qrPayload,
+                    isVerified = true,
+                    isOnline = true
                 )
-            }
+            connectToReadyShop(matchingShop, qrPayload)
         } else {
             _userUiState.value = _userUiState.value.copy(
                 scannerError = "Invalid QR code. Please scan a verified PrivPrint shop QR code."
@@ -631,7 +650,7 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
             onScanShopQr(shop.permanentQrPayload)
         } else {
             _userUiState.value = _userUiState.value.copy(
-                scannerError = "Shop ID or QR code '$trimmed' not recognized. Try SHOP-101, SHOP-102, or SHOP-103."
+                scannerError = "Shop ID or QR code '$trimmed' not recognized. Scan the QR code displayed by the shop."
             )
         }
     }

@@ -38,4 +38,5 @@ debug.keystore
 /hs_err_pid*.log
 /windows_agent/build/
 /windows_agent/dist/
+/windowsApp/bin/
 *.log
