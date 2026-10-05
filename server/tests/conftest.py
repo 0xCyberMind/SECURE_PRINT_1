@@ -50,7 +50,9 @@ fastapi_app.dependency_overrides[get_db_session] = override_get_db_session
 
 
 @pytest_asyncio.fixture(autouse=True, scope="function")
-async def setup_test_database():
+async def setup_test_database(monkeypatch):
+    from app.api.v1.endpoints import health as health_endpoint
+
     redis_svc = get_redis_service()
     redis_svc.set_simulation_failure(False)
     redis_client = await redis_svc.get_client()
@@ -62,6 +64,7 @@ async def setup_test_database():
 
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    monkeypatch.setattr(health_endpoint, "engine", test_engine)
     yield
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)

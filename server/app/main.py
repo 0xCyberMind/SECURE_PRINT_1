@@ -1,8 +1,8 @@
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.config import settings
@@ -16,6 +16,7 @@ from app.core.exceptions import (
 )
 from app.api.middleware import RequestIdMiddleware
 from app.api.v1.router import api_v1_router
+from app.api.v1.endpoints.health import check_dependencies, health_response
 from app.schemas.health import HealthResponse
 
 
@@ -66,18 +67,22 @@ def create_application() -> FastAPI:
 
     # Root health probe: /healthz
     @app.get("/healthz", response_model=HealthResponse, tags=["health"])
-    async def root_healthz() -> HealthResponse:
-        return HealthResponse(
-            status="healthy",
-            apiVersion="v1",
-            environment=settings.ENVIRONMENT.value,
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            checks={
-                "api": "healthy",
-                "database_driver": "ready",
-                "redis_client": "ready",
-                "storage_client": "ready"
-            }
+    async def root_healthz() -> JSONResponse:
+        checks = await check_dependencies()
+        result = health_response({
+            "api": "healthy",
+            "database_driver": checks["database"],
+            "redis_client": checks["redis"],
+            "storage_client": checks["storage"],
+        })
+        response_status = (
+            status.HTTP_200_OK
+            if result.status == "healthy"
+            else status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+        return JSONResponse(
+            status_code=response_status,
+            content=result.model_dump(),
         )
 
     return app

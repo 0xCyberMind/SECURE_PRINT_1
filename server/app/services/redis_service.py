@@ -44,12 +44,19 @@ class RedisService:
                 await client.ping()
                 self._client = client
             except Exception as e:
-                logger.info(f"Real Redis unavailable ({e}). Initializing FakeRedis fallback.")
+                if settings.ENVIRONMENT.value == "production":
+                    logger.error("Redis unavailable in production", exc_info=True)
+                    return None
+
+                logger.info(
+                    "Real Redis unavailable (%s). Initializing FakeRedis fallback.",
+                    e,
+                )
                 try:
                     import fakeredis.aioredis
                     self._client = fakeredis.aioredis.FakeRedis(decode_responses=True)
                 except Exception as fe:
-                    logger.warning(f"Failed to initialize FakeRedis: {fe}")
+                    logger.warning("Failed to initialize FakeRedis: %s", fe)
                     return None
         return self._client
 

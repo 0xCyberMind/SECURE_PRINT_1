@@ -18,8 +18,7 @@ def test_health_endpoints_and_monitoring_probes(client: TestClient):
     assert data["status"] == "healthy"
     assert data["checks"]["api"] == "healthy"
     assert data["checks"]["database_driver"] == "ready"
-    assert data["checks"]["redis_client"] == "ready"
-    assert data["checks"]["storage_client"] == "ready"
+    assert data["checks"]["storage_client"] == "not_checked"
 
     v1_res = client.get("/api/v1/health")
     assert v1_res.status_code == 200
