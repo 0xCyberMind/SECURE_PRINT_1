@@ -2,7 +2,12 @@ import os
 import json
 import pytest
 import asyncio
+import base64
+import hashlib
 from unittest.mock import AsyncMock
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from windows_agent.config import AgentConfig
 from windows_agent.secure_store import SecureCredentialStore
 from windows_agent.printer_spooler import PrinterSpoolerManager
@@ -70,6 +75,22 @@ def test_secure_credential_store(tmp_path):
     assert retrieved["api_key"] == "ppdev_secret_key_99"
     assert retrieved["access_token"] == "acc_tok_111"
 
+    private_key_pem = "encrypted-station-private-key"
+    store.store_credentials(
+        device_id="dev_win_test_123",
+        api_key="ppdev_secret_key_99",
+        access_token="acc_tok_111",
+        refresh_token="ref_tok_222",
+        station_private_key_pem=private_key_pem,
+    )
+    store.store_credentials(
+        device_id="dev_win_test_123",
+        api_key="ppdev_secret_key_99",
+        access_token="acc_tok_333",
+        refresh_token="ref_tok_444",
+    )
+    assert store.retrieve_credentials()["station_private_key_pem"] == private_key_pem
+
     store.clear()
     assert store.retrieve_credentials() is None
 
@@ -115,8 +136,9 @@ def test_printer_status_mapping_exact_states():
 
 
 @pytest.mark.asyncio
-async def test_agent_service_initialization(agent_config):
+async def test_agent_service_initialization(agent_config, monkeypatch):
     service = WindowsAgentService(agent_config)
+    monkeypatch.setattr(service.secure_store, "retrieve_credentials", lambda: None)
     await service.initialize()
     assert len(service.audit_log) >= 1
     assert service.audit_log[0]["eventType"] == "SYSTEM_INIT"
@@ -125,14 +147,66 @@ async def test_agent_service_initialization(agent_config):
 async def test_job_spooling_workflow(agent_config):
     service = WindowsAgentService(agent_config)
     await service.initialize()
+    service.config.device_id = "dev_win_test_123"
 
     job_id = "PRV-TEST-JOB-101"
+    plaintext = b"%PDF-1.4\nPrivPrint encrypted print test\n%%EOF"
+    aes_key = AESGCM.generate_key(bit_length=256)
+    iv = b"123456789012"
+    ciphertext = AESGCM(aes_key).encrypt(iv, plaintext, None)
+    wrapped_key = service._station_private_key.public_key().encrypt(
+        aes_key,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None,
+        ),
+    )
+    service.api_client.get_print_queue = AsyncMock(return_value=[{
+        "id": job_id,
+        "shop_id": agent_config.shop_id,
+        "document_id": "DOC-TEST-101",
+        "status": "AUTHORIZED",
+        "requested_copies": 1,
+        "printer_id": "PRN-HP-01",
+    }])
+    service.api_client.get_print_content = AsyncMock(return_value={
+        "ciphertext": ciphertext,
+        "wrapped_key": base64.b64encode(wrapped_key).decode("ascii"),
+        "iv": iv.hex(),
+        "sha256": hashlib.sha256(ciphertext).hexdigest(),
+        "filename": "test.pdf",
+    })
+    service.api_client.start_printing = AsyncMock(return_value={})
+    service.api_client.increment_copy = AsyncMock(return_value={})
+    service.api_client.execute_cleanup = AsyncMock(return_value={})
+    service.api_client.fail_job = AsyncMock(return_value={})
+
     await service.process_print_job(job_id)
 
     assert len(service.job_history) == 1
-    assert service.job_history[0]["jobId"] == job_id
+    assert service.job_history[0]["id"] == job_id
     assert service.job_history[0]["status"] == "COMPLETED"
     assert "verification_status" in service.job_history[0]
+    assert service.api_client.get_print_content.await_count == 1
+    service.api_client.start_printing.assert_awaited_once_with(job_id)
+    assert service.api_client.fail_job.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_missing_authorized_job_is_not_replaced_with_synthetic_document(agent_config):
+    service = WindowsAgentService(agent_config)
+    await service.initialize()
+    service.config.device_id = "dev_win_test_123"
+    service.api_client.get_print_queue = AsyncMock(return_value=[])
+    service.api_client.get_print_content = AsyncMock()
+    service.api_client.fail_job = AsyncMock(return_value={})
+
+    await service.process_print_job("PRV-MISSING")
+
+    assert service.job_history == []
+    service.api_client.get_print_content.assert_not_awaited()
+    service.api_client.fail_job.assert_awaited_once()
 
 
 def test_spooler_state_transitions_and_tracking():
@@ -188,30 +262,141 @@ def test_dashboard_api_status(agent_config):
     assert data["server_base_url"] == agent_config.server_base_url
 
 
-def test_dashboard_operator_otp_setup_routes(agent_config, monkeypatch):
+def test_dashboard_email_password_setup_routes(agent_config):
     service = WindowsAgentService(agent_config)
-    service.request_operator_otp = AsyncMock()
-    service.verify_operator_otp = AsyncMock(return_value=[
+    service.login_operator = AsyncMock(return_value=[
         {"id": "shop-test", "name": "Test Xerox Shop"}
+    ])
+    service.register_operator = AsyncMock(return_value=[
+        {"id": "shop-new", "name": "New Xerox Shop"}
     ])
     service.connect_operator_shop = AsyncMock()
     init_dashboard(service)
 
     client = TestClient(dashboard_app)
-    requested = client.post(
-        "/api/auth/request-otp",
-        json={"phone_number": "+919876543210"},
+    logged_in = client.post(
+        "/api/auth/login",
+        json={"email": "operator@example.com", "password": "Password123!"},
     )
-    assert requested.status_code == 200
-    service.request_operator_otp.assert_awaited_once_with("+919876543210")
+    assert logged_in.status_code == 200
+    assert logged_in.json()["shops"] == [{"id": "shop-test", "name": "Test Xerox Shop"}]
+    service.login_operator.assert_awaited_once_with(
+        "operator@example.com",
+        "Password123!",
+    )
 
-    verified = client.post(
-        "/api/auth/verify-otp",
-        json={"phone_number": "+919876543210", "otp": "123456"},
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "email": "new-operator@example.com",
+            "password": "Password123!",
+            "full_name": "Shop Operator",
+            "shop_name": "New Xerox Shop",
+            "shop_address": "12 Main Market Road",
+        },
     )
-    assert verified.status_code == 200
-    assert verified.json()["shops"] == [{"id": "shop-test", "name": "Test Xerox Shop"}]
+    assert registered.status_code == 200
+    assert registered.json()["shops"] == [{"id": "shop-new", "name": "New Xerox Shop"}]
+    service.register_operator.assert_awaited_once_with(
+        "new-operator@example.com",
+        "Password123!",
+        "Shop Operator",
+        "New Xerox Shop",
+        "12 Main Market Road",
+    )
 
     connected = client.post("/api/auth/connect", json={"shop_id": "shop-test"})
     assert connected.status_code == 200
     service.connect_operator_shop.assert_awaited_once_with("shop-test")
+
+
+@pytest.mark.asyncio
+async def test_operator_email_login_loads_owned_shops(agent_config):
+    service = WindowsAgentService(agent_config)
+    service.api_client.login_operator = AsyncMock(return_value={
+        "access_token": "operator-token",
+        "user": {"role": "SHOP_OPERATOR"},
+    })
+    service.api_client.list_operator_shops = AsyncMock(return_value=[
+        {"id": "shop-test", "name": "Test Xerox Shop"},
+    ])
+
+    shops = await service.login_operator("operator@example.com", "Password123!")
+
+    assert shops == [{"id": "shop-test", "name": "Test Xerox Shop"}]
+    assert service._operator_token == "operator-token"
+    service.api_client.list_operator_shops.assert_awaited_once_with("operator-token")
+
+
+@pytest.mark.asyncio
+async def test_operator_email_login_rejects_non_shop_role(agent_config):
+    service = WindowsAgentService(agent_config)
+    service.api_client.login_operator = AsyncMock(return_value={
+        "access_token": "customer-token",
+        "user": {"role": "USER"},
+    })
+    service.api_client.list_operator_shops = AsyncMock()
+
+    with pytest.raises(RuntimeError, match="not registered as a Xerox shop operator"):
+        await service.login_operator("customer@example.com", "Password123!")
+
+    service.api_client.list_operator_shops.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_connecting_shop_registers_station_key_before_starting(agent_config, monkeypatch):
+    service = WindowsAgentService(agent_config)
+    monkeypatch.setattr(service.secure_store, "retrieve_credentials", lambda: None)
+    monkeypatch.setattr(service.secure_store, "store_credentials", lambda **kwargs: None)
+    monkeypatch.setattr(service.config, "save", lambda: None)
+    await service.initialize()
+    service._operator_token = "operator-token"
+    service._pending_operator_shops = {"shop-test": "Test Xerox Shop"}
+    service.api_client.register_device = AsyncMock(return_value={
+        "device_id": "dev_win_test_123",
+        "api_key": "station-api-key",
+    })
+    service.api_client.authenticate_device = AsyncMock(return_value={
+        "access_token": "station-access-token",
+        "refresh_token": "station-refresh-token",
+    })
+    service.api_client.register_device_print_key = AsyncMock()
+    service._start_authenticated_tasks = AsyncMock()
+
+    await service.connect_operator_shop("shop-test")
+
+    service.api_client.register_device_print_key.assert_awaited_once()
+    args = service.api_client.register_device_print_key.await_args.args
+    assert args[0] == "dev_win_test_123"
+    assert base64.b64decode(args[1], validate=True)
+    assert service.encryption_key_registered is True
+    service._start_authenticated_tasks.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_shop_connection_fails_if_station_key_cannot_register(agent_config, monkeypatch):
+    service = WindowsAgentService(agent_config)
+    monkeypatch.setattr(service.secure_store, "retrieve_credentials", lambda: None)
+    monkeypatch.setattr(service.secure_store, "store_credentials", lambda **kwargs: None)
+    monkeypatch.setattr(service.config, "save", lambda: None)
+    await service.initialize()
+    service._operator_token = "operator-token"
+    service._pending_operator_shops = {"shop-test": "Test Xerox Shop"}
+    service.api_client.register_device = AsyncMock(return_value={
+        "device_id": "dev_win_test_123",
+        "api_key": "station-api-key",
+    })
+    service.api_client.authenticate_device = AsyncMock(return_value={
+        "access_token": "station-access-token",
+        "refresh_token": "station-refresh-token",
+    })
+    service.api_client.register_device_print_key = AsyncMock(
+        side_effect=RuntimeError("backend unavailable")
+    )
+    service._start_authenticated_tasks = AsyncMock()
+
+    with pytest.raises(RuntimeError, match="backend unavailable"):
+        await service.connect_operator_shop("shop-test")
+
+    assert service.encryption_key_registered is False
+    service._start_authenticated_tasks.assert_not_awaited()

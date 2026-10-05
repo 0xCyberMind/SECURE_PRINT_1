@@ -15,6 +15,12 @@ import com.example.privprint.data.model.PrintSettings
 import com.example.privprint.data.model.Shop
 import com.example.privprint.data.repository.PrivPrintRepository
 import kotlinx.coroutines.runBlocking
+import java.security.KeyPairGenerator
+import java.security.spec.MGF1ParameterSpec
+import java.util.Base64
+import javax.crypto.Cipher
+import javax.crypto.spec.OAEPParameterSpec
+import javax.crypto.spec.PSource
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -69,6 +75,32 @@ class ExampleRobolectricTest {
         )
 
         assertEquals("CONFIDENTIAL_XEROX_PAYLOAD_TEST_DATA", String(decrypted, Charsets.UTF_8))
+    }
+
+    @Test
+    fun testDocumentKeyCanBeUnwrappedByRegisteredRsaStationKey() {
+        val stationKeyPair = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
+        val documentKey = ByteArray(32) { it.toByte() }
+        val publicKeyBase64 = Base64.getEncoder().encodeToString(
+            stationKeyPair.public.encoded
+        )
+
+        val wrappedKey = Base64.getDecoder().decode(
+            CryptoEngine.wrapDocumentKeyForStation(documentKey, publicKeyBase64)
+        )
+        val decryptCipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding")
+        decryptCipher.init(
+            Cipher.DECRYPT_MODE,
+            stationKeyPair.private,
+            OAEPParameterSpec(
+                "SHA-256",
+                "MGF1",
+                MGF1ParameterSpec.SHA256,
+                PSource.PSpecified.DEFAULT
+            )
+        )
+
+        assertTrue(documentKey.contentEquals(decryptCipher.doFinal(wrappedKey)))
     }
 
     @Test

@@ -13,6 +13,7 @@ import com.example.privprint.data.api.models.PhoneOtpRequest
 import com.example.privprint.data.api.models.PhoneOtpVerifyRequest
 import com.example.privprint.data.api.models.OtpRequestResponse
 import com.example.privprint.data.api.models.NearbyShopDto
+import com.example.privprint.data.api.models.StationPrintKeyDto
 import com.example.privprint.data.api.models.UserRole
 import com.example.privprint.data.auth.AuthResult
 import com.example.privprint.data.auth.AuthTokenManager
@@ -48,6 +49,7 @@ import kotlinx.coroutines.flow.map
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.net.URLDecoder
+import java.io.IOException
 import java.security.SecureRandom
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -61,6 +63,30 @@ class PrivPrintRepository(
 
     private val secureRandom = SecureRandom()
     private val processedIdempotencyKeys = ConcurrentHashMap.newKeySet<String>()
+
+    private fun <T : Any> requireApiBody(
+        response: retrofit2.Response<T>,
+        operation: String
+    ): T {
+        if (!response.isSuccessful) {
+            val serverMessage = response.errorBody()?.string()?.take(400)
+            throw IOException(
+                if (serverMessage.isNullOrBlank()) "$operation failed (HTTP ${response.code()})."
+                else "$operation failed (HTTP ${response.code()}): $serverMessage"
+            )
+        }
+        return response.body() ?: throw IOException("$operation returned an empty response.")
+    }
+
+    private fun requireApiSuccess(response: retrofit2.Response<*>, operation: String) {
+        if (!response.isSuccessful) {
+            val serverMessage = response.errorBody()?.string()?.take(400)
+            throw IOException(
+                if (serverMessage.isNullOrBlank()) "$operation failed (HTTP ${response.code()})."
+                else "$operation failed (HTTP ${response.code()}): $serverMessage"
+            )
+        }
+    }
 
     init {
         ApiClient.init(authTokenManager)
@@ -470,7 +496,7 @@ class PrivPrintRepository(
                 email = body.user.email,
                 phoneNumber = body.user.phoneNumber,
                 shopName = shopName?.trim(),
-                shopPendingApproval = role == UserRole.SHOP_OPERATOR
+                shopPendingApproval = false
             )
             authTokenManager.saveAuth(user, body.accessToken, body.refreshToken)
             realtimeClient.connect("user:${body.user.id}", body.accessToken)
@@ -632,7 +658,7 @@ class PrivPrintRepository(
     }
 
     /**
-     * Submits an encrypted print job with document upload and atomic job creation via `/api/v1/jobs`.
+     * Uploads an encrypted document and creates an authorized remote print job.
      */
     suspend fun submitPrintJob(
         session: PrintSession,
@@ -643,22 +669,35 @@ class PrivPrintRepository(
         idempotencyKey: String? = null
     ): PrintJob {
         val now = System.currentTimeMillis()
-        val token = authTokenManager.getAccessToken() ?: ""
+        val token = authTokenManager.getAccessToken()
+            ?: throw IOException("Sign in before uploading a document to a print station.")
+        val stationKeys = requireApiBody(
+            ApiClient.apiService.getShopPrintKeys("Bearer $token", session.shopId),
+            "Loading secure print station keys"
+        )
+        if (stationKeys.isEmpty()) {
+            throw IOException(
+                "This shop's Windows station has not registered its encryption key. " +
+                    "Open the updated Windows station app, connect it to this shop, and retry."
+            )
+        }
 
-        // 1. Client-side AES-256-GCM encryption with fresh IV
-        val encryptionResult = CryptoEngine.encryptDocument(documentBytes)
-        val ivHex = encryptionResult.iv.joinToString("") { "%02x".format(it) }
-        val ciphertextSha256 = CryptoEngine.computeSha256Hex(encryptionResult.ciphertext)
-
-        // Clean up plaintext memory
-        CryptoEngine.zeroize(documentBytes)
-
-        var remoteDocumentId: String = "DOC-${UUID.randomUUID().toString().take(8).uppercase()}"
-
-        // 2. Perform init-upload, chunk upload, and complete-upload on real backend
-        if (token.isNotEmpty()) {
-            try {
-                val initRes = ApiClient.apiService.initUpload(
+        val encryptionResult = try {
+            CryptoEngine.encryptDocument(documentBytes)
+        } finally {
+            CryptoEngine.zeroize(documentBytes)
+        }
+        try {
+            val wrappedKeys = stationKeys.associate { station ->
+                station.deviceId to CryptoEngine.wrapDocumentKeyForStation(
+                    encryptionResult.ephemeralKey,
+                    station.publicKey
+                )
+            }
+            val ivHex = encryptionResult.iv.joinToString("") { "%02x".format(it) }
+            val ciphertextSha256 = CryptoEngine.computeSha256Hex(encryptionResult.ciphertext)
+            val uploadInfo = requireApiBody(
+                ApiClient.apiService.initUpload(
                     bearerToken = "Bearer $token",
                     request = InitUploadRequest(
                         sessionId = session.sessionId,
@@ -668,47 +707,41 @@ class PrivPrintRepository(
                         sha256Hash = ciphertextSha256,
                         ivHex = ivHex,
                         keyFingerprint = encryptionResult.keyFingerprint,
+                        wrappedKeys = wrappedKeys,
                         copiesAuthorized = settings.copies
                     )
-                )
-                if (initRes.isSuccessful && initRes.body() != null) {
-                    val uploadInfo = initRes.body()!!
-                    remoteDocumentId = uploadInfo.documentId
+                ),
+                "Starting encrypted document upload"
+            )
 
-                    // Upload raw ciphertext chunk straight to private storage
-                    val reqBody = encryptionResult.ciphertext.toRequestBody("application/octet-stream".toMediaType())
-                    ApiClient.apiService.uploadCiphertextChunk("Bearer $token", uploadInfo.uploadId, reqBody)
-
-                    // Complete upload
-                    ApiClient.apiService.completeUpload(
-                        bearerToken = "Bearer $token",
-                        uploadId = uploadInfo.uploadId,
-                        request = CompleteUploadRequest(
-                            documentId = uploadInfo.documentId,
-                            sessionId = session.sessionId,
-                            sha256Hash = ciphertextSha256,
-                            fileSizeBytes = encryptionResult.ciphertext.size.toLong()
-                        )
+            val requestBody = encryptionResult.ciphertext.toRequestBody("application/octet-stream".toMediaType())
+            requireApiSuccess(
+                ApiClient.apiService.uploadCiphertextChunk("Bearer $token", uploadInfo.uploadId, requestBody),
+                "Uploading encrypted document"
+            )
+            requireApiBody(
+                ApiClient.apiService.completeUpload(
+                    bearerToken = "Bearer $token",
+                    uploadId = uploadInfo.uploadId,
+                    request = CompleteUploadRequest(
+                        documentId = uploadInfo.documentId,
+                        sessionId = session.sessionId,
+                        sha256Hash = ciphertextSha256,
+                        fileSizeBytes = encryptionResult.ciphertext.size.toLong()
                     )
-                }
-            } catch (e: Exception) {
-                // Fallback to local queue if offline
-            }
-        }
+                ),
+                "Finalizing encrypted document upload"
+            )
 
-        // 3. Create job via `/api/v1/jobs`
-        val jobKey = idempotencyKey ?: UUID.randomUUID().toString()
-        var remoteJobId: String? = null
-
-        if (token.isNotEmpty()) {
-            try {
-                val createJobRes = ApiClient.apiService.createJob(
+            val jobKey = idempotencyKey ?: UUID.randomUUID().toString()
+            val createdJob = requireApiBody(
+                ApiClient.apiService.createJob(
                     bearerToken = "Bearer $token",
                     idempotencyKey = jobKey,
                     request = CreateJobRequest(
                         shopId = session.shopId,
                         sessionId = session.sessionId,
-                        documentId = remoteDocumentId,
+                        documentId = uploadInfo.documentId,
                         requestedCopies = settings.copies,
                         pageCount = pageCount,
                         colorMode = if (settings.colorMode == ColorMode.BLACK_AND_WHITE) "MONOCHROME" else "COLOR",
@@ -717,17 +750,18 @@ class PrivPrintRepository(
                         duplexMode = if (settings.duplexMode == DuplexMode.SINGLE_SIDED) "SIMPLEX" else "DUPLEX",
                         idempotencyKey = jobKey
                     )
-                )
-                if (createJobRes.isSuccessful && createJobRes.body() != null) {
-                    remoteJobId = createJobRes.body()!!.jobId
-                }
-            } catch (e: Exception) {
-                // Fallback
-            }
-        }
-
-        val randomSuffix = (100000 + secureRandom.nextInt(900000)).toString(16).uppercase()
-        val jobId = remoteJobId ?: "PRV-2026-$randomSuffix"
+                ),
+                "Creating print job"
+            )
+            val authorizedJob = requireApiBody(
+                ApiClient.apiService.authorizeJob(
+                    bearerToken = "Bearer $token",
+                    idempotencyKey = jobKey,
+                    jobId = createdJob.jobId
+                ),
+                "Authorizing print job"
+            )
+            val jobId = authorizedJob.jobId
 
         val jobEntity = PrintJobEntity(
             jobId = jobId,
@@ -753,8 +787,6 @@ class PrivPrintRepository(
             failureReason = null
         )
         dao.insertJob(jobEntity)
-
-        encryptionResult.zeroizeKey()
 
         dao.insertAuditEvent(
             AuditEventEntity(
@@ -791,7 +823,11 @@ class PrivPrintRepository(
             )
         )
 
-        return jobEntity.toDomain()
+            return jobEntity.toDomain()
+        } finally {
+            encryptionResult.zeroizeKey()
+            CryptoEngine.zeroize(encryptionResult.ciphertext)
+        }
     }
 
     suspend fun incrementCopy(jobId: String): CopyIncrementResult {

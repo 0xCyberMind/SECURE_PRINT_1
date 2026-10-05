@@ -38,6 +38,12 @@ async def test_shop_registration_is_active_without_granting_admin_access(
     assert shop["status"] == "ACTIVE"
     assert shop["is_verified"] is True
     assert shop["is_online"] is False
+    station_keys = client.get(
+        f"/api/v1/shops/{shop['id']}/print-keys",
+        headers={"Authorization": f"Bearer {operator_token}"},
+    )
+    assert station_keys.status_code == 200, station_keys.text
+    assert station_keys.json() == []
 
     nearby = client.get(
         "/api/v1/shops/nearby?latitude=23.0225&longitude=72.5714&radius=10.0"

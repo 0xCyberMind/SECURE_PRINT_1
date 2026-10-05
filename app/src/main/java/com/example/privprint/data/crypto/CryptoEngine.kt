@@ -2,12 +2,18 @@ package com.example.privprint.data.crypto
 
 import java.security.MessageDigest
 import java.security.SecureRandom
+import java.security.KeyFactory
+import java.security.spec.X509EncodedKeySpec
 import java.util.Arrays
+import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
+import javax.crypto.spec.OAEPParameterSpec
+import javax.crypto.spec.PSource
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
+import java.security.spec.MGF1ParameterSpec
 
 /**
  * Production-grade AES-256-GCM Cryptographic Engine.
@@ -122,6 +128,27 @@ object CryptoEngine {
         val gcmSpec = GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv)
         cipher.init(Cipher.DECRYPT_MODE, keySpec, gcmSpec)
         return cipher.doFinal(ciphertext)
+    }
+
+    /**
+     * Wraps a per-document AES key for one registered Windows station.
+     */
+    fun wrapDocumentKeyForStation(keyBytes: ByteArray, publicKeyBase64: String): String {
+        val publicKeyBytes = Base64.getDecoder().decode(publicKeyBase64)
+        val publicKey = KeyFactory.getInstance("RSA")
+            .generatePublic(X509EncodedKeySpec(publicKeyBytes))
+        val cipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding")
+        cipher.init(
+            Cipher.ENCRYPT_MODE,
+            publicKey,
+            OAEPParameterSpec(
+                "SHA-256",
+                "MGF1",
+                MGF1ParameterSpec.SHA256,
+                PSource.PSpecified.DEFAULT
+            )
+        )
+        return Base64.getEncoder().encodeToString(cipher.doFinal(keyBytes))
     }
 
     /**

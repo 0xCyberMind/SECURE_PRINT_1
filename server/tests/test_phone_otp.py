@@ -67,25 +67,20 @@ def test_twilio_phone_otp_uses_provider_and_normalized_number(
     assert checked_codes == [("+919876543210", "654321")]
 
 
-def test_shop_operator_otp_uses_same_twilio_provider(
+def test_shop_operator_authentication_does_not_depend_on_phone_otp(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "AC-test")
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "test-token")
     monkeypatch.setattr(settings, "TWILIO_VERIFY_SERVICE_SID", "VA-test")
-    sent_requests = []
+    def fail_if_twilio_used(*args, **kwargs):
+        pytest.fail("Shop password registration must not call Twilio")
 
-    async def start_verification(phone_number: str) -> None:
-        sent_requests.append(phone_number)
+    monkeypatch.setattr(twilio_verify, "start_verification", fail_if_twilio_used)
+    monkeypatch.setattr(twilio_verify, "check_verification", fail_if_twilio_used)
 
-    async def check_verification(phone_number: str, code: str) -> bool:
-        return code == "654321"
-
-    monkeypatch.setattr(twilio_verify, "start_verification", start_verification)
-    monkeypatch.setattr(twilio_verify, "check_verification", check_verification)
-
-    response = client.post(
+    request = client.post(
         "/api/v1/auth/phone/request-otp",
         json={
             "phone_number": "+919876543210",
@@ -93,12 +88,12 @@ def test_shop_operator_otp_uses_same_twilio_provider(
             "shop_id": "SHOP-TEST",
         },
     )
+    assert request.status_code == 403, request.text
+    assert request.json()["error"]["message"] == (
+        "Shop accounts use email and password; phone OTP is not supported"
+    )
 
-    assert response.status_code == 200, response.text
-    assert response.json()["development_otp"] is None
-    assert sent_requests == ["+919876543210"]
-
-    verification = client.post(
+    verify = client.post(
         "/api/v1/auth/phone/verify-otp",
         json={
             "phone_number": "+919876543210",
@@ -107,19 +102,4 @@ def test_shop_operator_otp_uses_same_twilio_provider(
             "shop_id": "SHOP-TEST",
         },
     )
-    assert verification.status_code == 200, verification.text
-    operator_headers = {
-        "Authorization": f"Bearer {verification.json()['access_token']}"
-    }
-
-    shop = client.get("/api/v1/shops/SHOP-TEST")
-    assert shop.status_code == 200, shop.text
-    assert shop.json()["status"] == "ACTIVE"
-    assert shop.json()["is_verified"] is True
-
-    keys = client.get(
-        "/api/v1/shops/SHOP-TEST/print-keys",
-        headers=operator_headers,
-    )
-    assert keys.status_code == 200, keys.text
-    assert keys.json() == []
+    assert verify.status_code == 403, verify.text

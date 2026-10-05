@@ -28,25 +28,48 @@ class WindowsAgentApiClient:
             message = f"Request failed (HTTP {response.status_code})"
         raise RuntimeError(message)
 
-    async def request_operator_otp(self, phone_number: str) -> None:
-        url = f"{self.base_url}/api/v1/auth/phone/request-otp"
+    async def login_operator(self, email: str, password: str) -> Dict[str, Any]:
+        url = f"{self.base_url}/api/v1/auth/login"
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(
                 url,
-                json={"phone_number": phone_number, "role": "SHOP_OPERATOR"},
+                json={"email": email, "password": password},
             )
         self._raise_for_response(response)
+        return response.json()
 
-    async def verify_operator_otp(self, phone_number: str, otp: str) -> Dict[str, Any]:
-        url = f"{self.base_url}/api/v1/auth/phone/verify-otp"
+    async def register_operator(
+        self,
+        email: str,
+        password: str,
+        full_name: str,
+    ) -> Dict[str, Any]:
+        url = f"{self.base_url}/api/v1/auth/register"
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(
                 url,
                 json={
-                    "phone_number": phone_number,
-                    "otp": otp,
+                    "email": email,
+                    "password": password,
+                    "full_name": full_name,
                     "role": "SHOP_OPERATOR",
                 },
+            )
+        self._raise_for_response(response)
+        return response.json()
+
+    async def create_operator_shop(
+        self,
+        name: str,
+        address: str,
+        operator_token: str,
+    ) -> Dict[str, Any]:
+        url = f"{self.base_url}/api/v1/shops"
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(
+                url,
+                json={"name": name, "address": address},
+                headers={"Authorization": f"Bearer {operator_token}"},
             )
         self._raise_for_response(response)
         return response.json()
@@ -109,6 +132,33 @@ class WindowsAgentApiClient:
             self.config.access_token = self.access_token
             self.config.refresh_token = self.refresh_token
             return data
+
+    async def register_device_print_key(self, device_id: str, public_key: str) -> None:
+        url = f"{self.base_url}/api/v1/devices/{device_id}/print-key"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.put(
+                url,
+                json={"public_key": public_key},
+                headers=self._headers(),
+            )
+        self._raise_for_response(response)
+
+    async def get_print_content(self, document_id: str, job_id: str) -> Dict[str, Any]:
+        url = f"{self.base_url}/api/v1/documents/{document_id}/print-content"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                url,
+                params={"job_id": job_id},
+                headers=self._headers(),
+            )
+        self._raise_for_response(response)
+        return {
+            "ciphertext": response.content,
+            "wrapped_key": response.headers.get("X-PrivPrint-Wrapped-Key"),
+            "iv": response.headers.get("X-PrivPrint-IV"),
+            "sha256": response.headers.get("X-PrivPrint-SHA256"),
+            "filename": response.headers.get("X-PrivPrint-Filename"),
+        }
 
     async def get_print_queue(self, shop_id: str) -> List[Dict[str, Any]]:
         url = f"{self.base_url}/api/v1/print/jobs?shopId={shop_id}"
@@ -204,4 +254,3 @@ class WindowsAgentApiClient:
             self.config.access_token = self.access_token
             self.config.refresh_token = self.refresh_token
             return data
-

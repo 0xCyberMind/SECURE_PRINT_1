@@ -3,7 +3,7 @@ import sys
 import time
 import hashlib
 import logging
-from typing import List, Dict, Any, Optional, Callable
+from typing import List, Dict, Any, Optional, Callable, Union
 from dataclasses import dataclass
 
 logger = logging.getLogger("WindowsPrinterSpooler")
@@ -328,7 +328,7 @@ class PrinterSpoolerManager:
     def print_document(
         self,
         printer_id: str,
-        document_bytes: bytes,
+        document_bytes: Union[bytes, bytearray],
         document_name: str,
         copies: int = 1,
         progress_callback: Optional[Callable[[int, int, str], None]] = None

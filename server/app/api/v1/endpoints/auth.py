@@ -17,7 +17,7 @@ from app.core.security import (
 )
 from app.models.base import get_db_session
 from app.models.enums import UserRole
-from app.models.entities import User, RefreshToken, Shop
+from app.models.entities import User, RefreshToken
 from app.repositories.user_repo import UserRepository
 from app.repositories.session_repo import RefreshTokenRepository, AuditLogRepository
 from app.schemas.auth import (
@@ -62,6 +62,13 @@ def _normalize_phone_number(phone_number: str) -> str:
 async def request_phone_otp(
     payload: PhoneOtpRequest,
 ) -> OtpRequestResponse:
+    if payload.role == UserRole.SHOP_OPERATOR:
+        raise PrivPrintException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code=ErrorCode.FORBIDDEN,
+            message="Shop accounts use email and password; phone OTP is not supported",
+        )
+
     phone = _normalize_phone_number(payload.phone_number)
     redis = get_redis_service()
     client = await redis.get_client()
@@ -133,6 +140,13 @@ async def verify_phone_otp(
     payload: PhoneOtpVerifyRequest,
     db: AsyncSession = Depends(get_db_session),
 ) -> TokenResponse:
+    if payload.role == UserRole.SHOP_OPERATOR:
+        raise PrivPrintException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code=ErrorCode.FORBIDDEN,
+            message="Shop accounts use email and password; phone OTP is not supported",
+        )
+
     phone = _normalize_phone_number(payload.phone_number)
     redis = get_redis_service()
     client = await redis.get_client()
@@ -210,33 +224,6 @@ async def verify_phone_otp(
             code=ErrorCode.CONFLICT,
             message="Phone number is already registered for another role",
         )
-
-    if payload.role == UserRole.SHOP_OPERATOR:
-        # Auto-create shop for SHOP_OPERATOR if not already associated
-        shop_id = payload.shop_id or f"shop_{secrets.token_urlsafe(12)}"
-        shop = await db.get(Shop, shop_id) if payload.shop_id else None
-        if shop and shop.owner_id != user.id:
-            raise PrivPrintException(
-                status_code=status.HTTP_409_CONFLICT,
-                code=ErrorCode.CONFLICT,
-                message="Shop is already associated with another operator",
-            )
-        if not shop:
-            shop = Shop(
-                id=shop_id,
-                name="PrivPrint Xerox Station",
-                owner_id=user.id,
-                address="Address pending registration",
-                permanent_qr_payload=f"privprint://shop?id={shop_id}",
-                status="ACTIVE",
-                is_verified=True,
-                is_online=False,
-            )
-            db.add(shop)
-            await db.flush()
-        else:
-            shop.status = "ACTIVE"
-            shop.is_verified = True
 
     access_token = create_access_token(subject=user.id, role=user.role)
     refresh_token_str, refresh_jti, refresh_exp = create_refresh_token(

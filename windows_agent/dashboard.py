@@ -94,16 +94,28 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <section id="auth-gate" class="auth-gate" hidden>
         <div class="auth-card">
             <h1>Set up your Xerox station</h1>
-            <p>Sign in with your shop-operator phone. This device will be securely registered to one of your shops.</p>
-            <div id="auth-phone-step">
-                <label for="operator-phone">Operator phone (include country code)</label>
-                <input id="operator-phone" type="tel" autocomplete="tel" placeholder="+91..." maxlength="32">
-                <button id="request-otp-button" class="btn" onclick="requestOperatorOtp()">Send verification code</button>
+            <p>Sign in with your shop-operator email and password. This device will be securely registered to one of your shops.</p>
+            <div id="auth-login-step">
+                <label for="operator-email">Operator email</label>
+                <input id="operator-email" type="email" autocomplete="username" placeholder="you@example.com" maxlength="255">
+                <label for="operator-password">Password</label>
+                <input id="operator-password" type="password" autocomplete="current-password">
+                <button id="login-button" class="btn" onclick="loginOperator()">Sign in</button>
+                <button id="show-register-button" class="btn" type="button" onclick="showRegisterForm()">Create shop account</button>
             </div>
-            <div id="auth-otp-step" hidden>
-                <label for="operator-otp">6-digit verification code</label>
-                <input id="operator-otp" type="password" inputmode="numeric" autocomplete="one-time-code" maxlength="6">
-                <button id="verify-otp-button" class="btn" onclick="verifyOperatorOtp()">Verify code</button>
+            <div id="auth-register-step" hidden>
+                <label for="register-name">Your name</label>
+                <input id="register-name" type="text" autocomplete="name" maxlength="255">
+                <label for="register-email">Email</label>
+                <input id="register-email" type="email" autocomplete="email" maxlength="255">
+                <label for="register-password">Password (at least 8 characters)</label>
+                <input id="register-password" type="password" autocomplete="new-password" minlength="8">
+                <label for="register-shop-name">Shop name</label>
+                <input id="register-shop-name" type="text" maxlength="255">
+                <label for="register-shop-address">Shop address</label>
+                <input id="register-shop-address" type="text" minlength="5">
+                <button id="register-button" class="btn" onclick="registerOperator()">Create account and shop</button>
+                <button class="btn" type="button" onclick="showLoginForm()">Back to sign in</button>
             </div>
             <div id="auth-shop-step" hidden>
                 <label for="operator-shop">Choose your shop</label>
@@ -283,15 +295,40 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             document.getElementById('auth-message').innerText = message;
         }
 
-        async function requestOperatorOtp() {
-            const button = document.getElementById('request-otp-button');
+        function showRegisterForm() {
+            document.getElementById('auth-login-step').hidden = true;
+            document.getElementById('auth-register-step').hidden = false;
+            showAuthError('');
+        }
+
+        function showLoginForm() {
+            document.getElementById('auth-register-step').hidden = true;
+            document.getElementById('auth-login-step').hidden = false;
+            showAuthError('');
+        }
+
+        async function showShops(result) {
+            const selector = document.getElementById('operator-shop');
+            selector.replaceChildren();
+            for (const shop of result.shops) {
+                const option = document.createElement('option');
+                option.value = shop.id;
+                option.textContent = shop.name;
+                selector.appendChild(option);
+            }
+            document.getElementById('auth-shop-step').hidden = false;
+        }
+
+        async function loginOperator() {
+            const button = document.getElementById('login-button');
             button.disabled = true;
             showAuthError('');
             try {
-                await apiPost('/api/auth/request-otp', {phone_number: document.getElementById('operator-phone').value});
-                document.getElementById('auth-otp-step').hidden = false;
-                document.getElementById('operator-otp').focus();
-                showAuthError('Code requested. Check your phone.');
+                const result = await apiPost('/api/auth/login', {
+                    email: document.getElementById('operator-email').value,
+                    password: document.getElementById('operator-password').value
+                });
+                await showShops(result);
             } catch (error) {
                 showAuthError(error.message);
             } finally {
@@ -299,25 +336,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
         }
 
-        async function verifyOperatorOtp() {
-            const button = document.getElementById('verify-otp-button');
+        async function registerOperator() {
+            const button = document.getElementById('register-button');
             button.disabled = true;
             showAuthError('');
             try {
-                const result = await apiPost('/api/auth/verify-otp', {
-                    phone_number: document.getElementById('operator-phone').value,
-                    otp: document.getElementById('operator-otp').value
+                const result = await apiPost('/api/auth/register', {
+                    full_name: document.getElementById('register-name').value,
+                    email: document.getElementById('register-email').value,
+                    password: document.getElementById('register-password').value,
+                    shop_name: document.getElementById('register-shop-name').value,
+                    shop_address: document.getElementById('register-shop-address').value
                 });
-                const selector = document.getElementById('operator-shop');
-                selector.replaceChildren();
-                for (const shop of result.shops) {
-                    const option = document.createElement('option');
-                    option.value = shop.id;
-                    option.textContent = shop.name;
-                    selector.appendChild(option);
-                }
-                document.getElementById('auth-shop-step').hidden = false;
-                showAuthError('');
+                await showShops(result);
             } catch (error) {
                 showAuthError(error.message);
             } finally {
@@ -351,7 +382,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 document.getElementById('m-printers-count').innerText = data.printers.length;
                 document.getElementById('m-queue-count').innerText = Object.keys(data.active_jobs).length;
                 document.getElementById('m-completed-count').innerText = data.job_history.length;
-                document.getElementById('conn-state').innerText = data.is_wss_connected ? 'WSS Connected' : 'Disconnected';
+                document.getElementById('conn-state').innerText = !data.encryption_key_registered
+                    ? 'Encryption key pending'
+                    : (data.is_wss_connected ? 'WSS Connected' : 'Disconnected');
                 document.getElementById('c-endpoint').innerText = data.server_base_url;
                 document.getElementById('c-device-id').innerText = data.device_id || 'Not registered';
                 document.getElementById('s-server-url').value = data.server_base_url;
@@ -420,6 +453,7 @@ async def get_status_api():
         "shop_id": agent_service.config.shop_id,
         "server_base_url": agent_service.config.server_base_url,
         "device_id": agent_service.config.device_id,
+        "encryption_key_registered": agent_service.encryption_key_registered,
         "is_wss_connected": agent_service.realtime_client.is_connected,
         "printers": printers,
         "active_jobs": agent_service.active_jobs,
@@ -428,35 +462,44 @@ async def get_status_api():
     })
 
 
-class OperatorPhoneRequest(BaseModel):
-    phone_number: str = Field(..., min_length=7, max_length=32)
+class OperatorLoginRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=255)
+    password: str = Field(..., min_length=1, max_length=1024)
 
 
-class OperatorOtpVerifyRequest(OperatorPhoneRequest):
-    otp: str = Field(..., min_length=6, max_length=6)
+class OperatorRegisterRequest(OperatorLoginRequest):
+    full_name: str = Field(..., min_length=1, max_length=255)
+    shop_name: str = Field(..., min_length=2, max_length=255)
+    shop_address: str = Field(..., min_length=5)
 
 
 class ConnectShopRequest(BaseModel):
     shop_id: str = Field(..., min_length=1, max_length=64)
 
 
-@dashboard_app.post("/api/auth/request-otp")
-async def request_operator_otp(payload: OperatorPhoneRequest):
+@dashboard_app.post("/api/auth/login")
+async def login_operator(payload: OperatorLoginRequest):
     if not agent_service:
         raise HTTPException(status_code=503, detail="Windows station service is starting.")
     try:
-        await agent_service.request_operator_otp(payload.phone_number)
-        return {"status": "sent"}
+        shops = await agent_service.login_operator(payload.email, payload.password)
+        return {"shops": shops}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@dashboard_app.post("/api/auth/verify-otp")
-async def verify_operator_otp(payload: OperatorOtpVerifyRequest):
+@dashboard_app.post("/api/auth/register")
+async def register_operator(payload: OperatorRegisterRequest):
     if not agent_service:
         raise HTTPException(status_code=503, detail="Windows station service is starting.")
     try:
-        shops = await agent_service.verify_operator_otp(payload.phone_number, payload.otp)
+        shops = await agent_service.register_operator(
+            payload.email,
+            payload.password,
+            payload.full_name,
+            payload.shop_name,
+            payload.shop_address,
+        )
         return {"shops": shops}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

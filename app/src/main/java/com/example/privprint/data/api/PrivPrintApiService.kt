@@ -23,6 +23,7 @@ import com.example.privprint.data.api.models.RefreshTokenRequest
 import com.example.privprint.data.api.models.RevokeSessionRequest
 import com.example.privprint.data.api.models.SessionResponse
 import com.example.privprint.data.api.models.ShopDto
+import com.example.privprint.data.api.models.StationPrintKeyDto
 import com.example.privprint.data.api.models.ShopCreateRequest
 import com.example.privprint.data.api.models.TokenResponse
 import com.example.privprint.data.api.models.TokenRevocationRequest
@@ -119,6 +120,12 @@ interface PrivPrintApiService {
     suspend fun getShopPrinters(
         @Path("id") shopId: String
     ): Response<List<PrinterDto>>
+
+    @GET("api/v1/shops/{id}/print-keys")
+    suspend fun getShopPrintKeys(
+        @Header("Authorization") bearerToken: String,
+        @Path("id") shopId: String
+    ): Response<List<StationPrintKeyDto>>
 
     // Ephemeral Sessions (Pairing)
     @POST("api/v1/sessions")

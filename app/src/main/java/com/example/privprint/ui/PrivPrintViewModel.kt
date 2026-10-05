@@ -34,6 +34,7 @@ import com.example.privprint.data.api.models.EnvironmentMode
 import com.example.privprint.data.api.models.NearbyShopDto
 import com.example.privprint.data.api.models.UserRole
 import com.example.privprint.data.auth.AuthTokenManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 enum class AppMode {
@@ -173,18 +174,11 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
     private val _userOtpRequested = MutableStateFlow(false)
     val userOtpRequested: StateFlow<Boolean> = _userOtpRequested.asStateFlow()
 
-    private val _shopOtpRequested = MutableStateFlow(false)
-    val shopOtpRequested: StateFlow<Boolean> = _shopOtpRequested.asStateFlow()
-
     private val _developmentOtp = MutableStateFlow<String?>(null)
     val developmentOtp: StateFlow<String?> = _developmentOtp.asStateFlow()
 
     private var pendingUserName: String = ""
     private var pendingUserPhone: String = ""
-    private var pendingShopName: String = ""
-    private var pendingShopOperatorName: String = ""
-    private var pendingShopPhone: String = ""
-    private var pendingShopId: String = ""
 
     private val _currentMode = MutableStateFlow(
         if (savedAuthState == AuthState.SHOP_LOGGED_IN) AppMode.SHOP else AppMode.USER
@@ -522,136 +516,6 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
         _authLoginError.value = null
     }
 
-    fun requestShopOtp(
-        shopName: String,
-        operatorName: String,
-        operatorPhone: String
-    ): Boolean {
-        val trimmedOperator = operatorName.trim()
-        val trimmedPhone = operatorPhone.trim()
-        val trimmedShopName = shopName.trim()
-        if (_authLoginInProgress.value) return true
-        if (trimmedOperator.isBlank() || trimmedShopName.isBlank() || trimmedPhone.isBlank()) {
-            _authLoginError.value = "Enter your shop name, operator name, and phone number."
-            return false
-        }
-
-        pendingShopName = trimmedShopName
-        pendingShopOperatorName = trimmedOperator
-        pendingShopPhone = trimmedPhone
-        pendingShopId = "SHOP-${java.util.UUID.randomUUID().toString().take(8).uppercase()}"
-        _authLoginError.value = null
-        _authLoginInProgress.value = true
-        viewModelScope.launch {
-            when (val result = repository.requestPhoneOtp(
-                phoneNumber = pendingShopPhone,
-                role = UserRole.SHOP_OPERATOR,
-                shopId = pendingShopId
-            )) {
-                is com.example.privprint.data.repository.PrivPrintRepository.OtpRequestResult.Sent -> {
-                    _authLoginInProgress.value = false
-                    _shopOtpRequested.value = true
-                    _developmentOtp.value = result.response.developmentOtp
-                }
-                is com.example.privprint.data.repository.PrivPrintRepository.OtpRequestResult.Failure -> {
-                    _authLoginInProgress.value = false
-                    _authLoginError.value = "Could not send shop verification code: ${result.error}"
-                }
-            }
-        }
-        return true
-    }
-
-    fun verifyShopOtp(otp: String): Boolean {
-        val code = otp.trim()
-        if (_authLoginInProgress.value) return true
-        if (code.length != 6 || !code.all { it.isDigit() }) {
-            _authLoginError.value = "Enter the 6-digit verification code."
-            return false
-        }
-
-        _authLoginError.value = null
-        _authLoginInProgress.value = true
-        viewModelScope.launch {
-            when (val result = repository.verifyPhoneOtp(
-                phoneNumber = pendingShopPhone,
-                otp = code,
-                role = UserRole.SHOP_OPERATOR,
-                shopId = pendingShopId
-            )) {
-                is com.example.privprint.data.auth.AuthResult.Success -> {
-                    val shop = AuthShop(
-                        shopId = pendingShopId,
-                        shopName = pendingShopName,
-                        operatorName = pendingShopOperatorName,
-                        operatorPhone = pendingShopPhone
-                    )
-                    _currentShopAuth.value = shop
-                    _pendingLoginRole.value = null
-                    _authState.value = AuthState.SHOP_LOGGED_IN
-                    _currentMode.value = AppMode.SHOP
-                    _shopUiState.value = _shopUiState.value.copy(
-                        currentScreen = ShopScreen.DASHBOARD,
-                        statusNotice = "Shop operator verified: ${shop.shopName}"
-                    )
-                    _shopOtpRequested.value = false
-                    _developmentOtp.value = null
-                    _authLoginInProgress.value = false
-                    prefs.edit()
-                        .putString("auth_state", AuthState.SHOP_LOGGED_IN.name)
-                        .putString("shop_id", shop.shopId)
-                        .putString("shop_name", shop.shopName)
-                        .putString("operator_name", shop.operatorName)
-                        .putString("operator_phone", shop.operatorPhone)
-                        .apply()
-                    repository.saveShop(
-                        Shop(
-                            id = shop.shopId,
-                            name = shop.shopName,
-                            address = "Station Operator: ${shop.operatorName} • ${shop.operatorPhone}",
-                            permanentQrPayload = Shop.createQrPayload(shop.shopId, shop.shopName),
-                            isVerified = true,
-                            isOnline = true,
-                            supportedColor = true,
-                            supportedDuplex = true
-                        )
-                    )
-                    if (allPrinters.value.isEmpty()) {
-                        val printerId = "PRN-${System.currentTimeMillis().toString().takeLast(6)}"
-                        repository.savePrinter(
-                            Printer(
-                                id = printerId,
-                                shopId = shop.shopId,
-                                name = "LaserJet High-Speed & Xerox WorkCentre",
-                                model = "Enterprise Duplex Network / USB Spooler",
-                                isDefault = true,
-                                status = PrinterStatus.READY,
-                                paperStatus = PaperTrayStatus.FULL,
-                                tonerLevelPercent = 95,
-                                totalPrintedLifetime = 0
-                            )
-                        )
-                    }
-                }
-                is com.example.privprint.data.auth.AuthResult.Failure -> {
-                    _authLoginError.value = when (result.code) {
-                        "CONFLICT" -> "This number is registered as a customer, not a shop operator. Use a different shop-authorized number."
-                        else -> "Shop verification failed: ${result.error}"
-                    }
-                    _authLoginInProgress.value = false
-                }
-            }
-        }
-        return true
-    }
-
-    fun resetShopOtp() {
-        if (_authLoginInProgress.value) return
-        _shopOtpRequested.value = false
-        _developmentOtp.value = null
-        _authLoginError.value = null
-    }
-
     fun savePrinter(
         name: String,
         model: String,
@@ -826,17 +690,26 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
         }
 
         viewModelScope.launch {
-            val job = repository.submitPrintJob(
-                session = session,
-                documentName = doc.name,
-                documentBytes = doc.rawBytes,
-                pageCount = doc.pageCount,
-                settings = settings
-            )
-            _userUiState.value = _userUiState.value.copy(
-                currentScreen = UserScreen.ACTIVE_TRACKING,
-                toastMessage = "Document encrypted (AES-256-GCM) and queued!"
-            )
+            try {
+                repository.submitPrintJob(
+                    session = session,
+                    documentName = doc.name,
+                    documentBytes = doc.rawBytes,
+                    pageCount = doc.pageCount,
+                    settings = settings
+                )
+                _userUiState.value = _userUiState.value.copy(
+                    currentScreen = UserScreen.ACTIVE_TRACKING,
+                    toastMessage = "Document encrypted and securely sent to the print station."
+                )
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                _userUiState.value = _userUiState.value.copy(
+                    selectedDocument = null,
+                    currentScreen = UserScreen.DOCUMENT_PICKER,
+                    toastMessage = "File was not sent: ${e.message ?: "secure upload failed"}. Select it again to retry."
+                )
+            }
         }
     }
 

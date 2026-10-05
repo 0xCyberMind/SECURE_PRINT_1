@@ -34,13 +34,20 @@ class SecureCredentialStore:
         access_token: str,
         refresh_token: str,
         shop_id: Optional[str] = None,
+        station_private_key_pem: Optional[str] = None,
     ):
+        if station_private_key_pem is None:
+            existing = self.retrieve_credentials()
+            station_private_key_pem = (
+                existing.get("station_private_key_pem") if existing else None
+            )
         payload = {
             "device_id": device_id,
             "api_key": api_key,
             "access_token": access_token,
             "refresh_token": refresh_token,
             "shop_id": shop_id,
+            "station_private_key_pem": station_private_key_pem,
         }
         raw_bytes = json.dumps(payload).encode("utf-8")
 
@@ -51,8 +58,8 @@ class SecureCredentialStore:
                 with open(self.storage_path, "wb") as f:
                     f.write(protected)
                 return
-            except Exception:
-                pass
+            except Exception as exc:
+                raise RuntimeError("Could not protect station credentials with Windows DPAPI") from exc
 
         # Fallback obfuscated storage for cross-platform/test environments
         encoded = base64.b64encode(raw_bytes)
@@ -63,22 +70,19 @@ class SecureCredentialStore:
         if not os.path.exists(self.storage_path):
             return None
 
-        try:
-            with open(self.storage_path, "rb") as f:
-                content = f.read()
+        with open(self.storage_path, "rb") as f:
+            content = f.read()
 
-            if self._is_windows():
-                try:
-                    import win32crypt
-                    _, decrypted = win32crypt.CryptUnprotectData(content, None, None, None, 0)
-                    return json.loads(decrypted.decode("utf-8"))
-                except Exception:
-                    pass
+        if self._is_windows():
+            try:
+                import win32crypt
+                _, decrypted = win32crypt.CryptUnprotectData(content, None, None, None, 0)
+            except Exception as exc:
+                raise RuntimeError("Could not decrypt station credentials with Windows DPAPI") from exc
+            return json.loads(decrypted.decode("utf-8"))
 
-            decoded = base64.b64decode(content)
-            return json.loads(decoded.decode("utf-8"))
-        except Exception:
-            return None
+        decoded = base64.b64decode(content, validate=True)
+        return json.loads(decoded.decode("utf-8"))
 
     def clear(self):
         if os.path.exists(self.storage_path):

@@ -23,6 +23,7 @@ try {
         --hidden-import win32print `
         --collect-all uvicorn `
         --collect-all websockets `
+        --collect-all cryptography `
         $entryPoint
     if ($LASTEXITCODE -ne 0) {
         throw "PyInstaller failed with exit code $LASTEXITCODE"

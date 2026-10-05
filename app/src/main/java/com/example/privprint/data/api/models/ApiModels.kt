@@ -196,7 +196,13 @@ data class InitUploadRequest(
     @Json(name = "sha256_hash") val sha256Hash: String,
     @Json(name = "iv_hex") val ivHex: String,
     @Json(name = "key_fingerprint") val keyFingerprint: String,
+    @Json(name = "wrapped_keys") val wrappedKeys: Map<String, String> = emptyMap(),
     @Json(name = "copies_authorized") val copiesAuthorized: Int = 1
+)
+
+data class StationPrintKeyDto(
+    @Json(name = "device_id") val deviceId: String,
+    @Json(name = "public_key") val publicKey: String
 )
 
 // Server: InitUploadResponse

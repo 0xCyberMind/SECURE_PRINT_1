@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit
 
 object ApiClient {
 
-    const val PROD_BASE_URL = "https://api.privprint.com/"
+    const val PROD_BASE_URL = "https://secure-print-1.onrender.com/"
     const val DEV_BASE_URL = "https://ais-dev-6u62dc37mqabbjyehi6umo-408539472511.asia-southeast1.run.app/"
     const val DEFAULT_BASE_URL = BuildConfig.API_BASE_URL
 
