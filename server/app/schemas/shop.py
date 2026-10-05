@@ -94,6 +94,15 @@ class DeviceAuthenticateRequest(BaseModel):
     api_key: str = Field(..., min_length=8)
 
 
+class DevicePrintKeyRequest(BaseModel):
+    public_key: str = Field(..., min_length=128, max_length=4096)
+
+
+class DevicePrintKeyResponse(BaseModel):
+    device_id: str
+    public_key: str
+
+
 class SessionRevokeRequest(BaseModel):
     reason: Optional[str] = None
 
@@ -159,4 +168,3 @@ class PrinterSelectResponse(BaseModel):
 class PrinterSyncRequest(BaseModel):
     shop_id: str
     printers: List[PrinterResponse]
-

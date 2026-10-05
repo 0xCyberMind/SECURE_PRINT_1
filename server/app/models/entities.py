@@ -7,6 +7,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Float,
+    JSON,
     DateTime,
     ForeignKey,
     CheckConstraint,
@@ -81,6 +82,7 @@ class Device(Base, TimestampMixin):
     hardware_fingerprint = Column(String(255), nullable=True, index=True)
     ip_address = Column(String(64), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
+    encryption_public_key = Column(Text, nullable=True)
     last_seen_at = Column(DateTime(timezone=True), nullable=True)
     last_heartbeat_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -144,6 +146,7 @@ class Document(Base, TimestampMixin):
     encryption_algorithm = Column(String(64), default="AES-256-GCM", nullable=False)
     iv_hex = Column(String(64), nullable=False)
     key_fingerprint = Column(String(128), nullable=False)
+    wrapped_keys = Column(JSON, nullable=True)
     copies_authorized = Column(Integer, default=1, nullable=False)
     copies_consumed = Column(Integer, default=0, nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
@@ -176,6 +179,7 @@ class PendingUpload(Base, TimestampMixin):
     sha256_hash = Column(String(64), nullable=False)
     iv_hex = Column(String(64), nullable=False)
     key_fingerprint = Column(String(128), nullable=False)
+    wrapped_keys = Column(JSON, nullable=True)
     copies_authorized = Column(Integer, default=1, nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     status = Column(String(32), default="PENDING", nullable=False)

@@ -1,17 +1,20 @@
 import os
 import uuid
 import re
+import base64
+import hashlib
+from urllib.parse import quote
 from datetime import datetime, timezone
 from typing import Optional
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.exceptions import PrivPrintException, ErrorCode
 from app.models.base import get_db_session
-from app.models.enums import UserRole
-from app.models.entities import Document, PendingUpload, Session, PrintJob
+from app.models.enums import PrintJobStatus, UserRole
+from app.models.entities import Device, Document, PendingUpload, Session, PrintJob
 from app.repositories.session_repo import SessionRepository
 from app.repositories.document_repo import DocumentRepository
 from app.schemas.document import (
@@ -109,6 +112,44 @@ async def init_upload(
             message="Invalid SHA-256 checksum format"
         )
 
+    if not payload.wrapped_keys and settings.ENVIRONMENT.value != "development":
+        raise PrivPrintException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code=ErrorCode.VALIDATION_ERROR,
+            message="No registered Windows station encryption keys are available for this shop",
+        )
+
+    if payload.wrapped_keys:
+        active_device_result = await db.execute(
+            select(Device).where(
+                Device.shop_id == session.shop_id,
+                Device.is_active.is_(True),
+                Device.encryption_public_key.isnot(None),
+            )
+        )
+        active_devices = {device.id: device for device in active_device_result.scalars().all()}
+        if set(payload.wrapped_keys) != set(active_devices):
+            raise PrivPrintException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code=ErrorCode.VALIDATION_ERROR,
+                message="Document key must be wrapped for every active station in this shop",
+            )
+        for wrapped_key in payload.wrapped_keys.values():
+            try:
+                decoded_key = base64.b64decode(wrapped_key, validate=True)
+            except (ValueError, TypeError) as exc:
+                raise PrivPrintException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    code=ErrorCode.VALIDATION_ERROR,
+                    message="Invalid encrypted document key",
+                ) from exc
+            if not decoded_key or len(decoded_key) > 1024:
+                raise PrivPrintException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    code=ErrorCode.VALIDATION_ERROR,
+                    message="Invalid encrypted document key",
+                )
+
     upload_id = f"upl_{uuid.uuid4().hex}"
     doc_id = f"DOC-{uuid.uuid4().hex[:8].upper()}"
 
@@ -134,6 +175,7 @@ async def init_upload(
         sha256_hash=payload.sha256_hash.lower(),
         iv_hex=payload.iv_hex,
         key_fingerprint=payload.key_fingerprint,
+        wrapped_keys=payload.wrapped_keys,
         copies_authorized=payload.copies_authorized,
         expires_at=session.expires_at,
         status="PENDING"
@@ -271,14 +313,30 @@ async def complete_upload(
         )
 
     # 4. Storage Validation (Ensure object was received in private S3 bucket)
-    # If storage is in-memory or real S3, verify existence; if simulator lacks payload, place stub to complete
     if not storage.object_exists(pending.storage_path):
-        # Allow simulated upload in mock environments
-        storage.put_object_data(
-            pending.storage_path,
-            b"[PRIVPRINT-ENCRYPTED-CIPHERTEXT-STUB]",
-            content_type=pending.mime_type
-        )
+        if settings.ENVIRONMENT.value == "development":
+            storage.put_object_data(
+                pending.storage_path,
+                b"[PRIVPRINT-ENCRYPTED-CIPHERTEXT-STUB]",
+                content_type=pending.mime_type,
+            )
+        else:
+            raise PrivPrintException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code=ErrorCode.UPLOAD_FAILED,
+                message="Ciphertext upload is missing; retry the upload before creating a print job",
+            )
+    elif settings.ENVIRONMENT.value != "development":
+        stored_ciphertext = storage.get_object_data(pending.storage_path)
+        if (
+            len(stored_ciphertext) != pending.file_size_bytes
+            or hashlib.sha256(stored_ciphertext).hexdigest() != pending.sha256_hash
+        ):
+            raise PrivPrintException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code=ErrorCode.UPLOAD_FAILED,
+                message="Uploaded ciphertext failed size or checksum validation",
+            )
 
     # 5. Persist Document Metadata in PostgreSQL (Document ciphertext is in S3, NEVER in DB)
     doc_repo = DocumentRepository(db)
@@ -294,6 +352,7 @@ async def complete_upload(
         encryption_algorithm="AES-256-GCM",
         iv_hex=pending.iv_hex,
         key_fingerprint=pending.key_fingerprint,
+        wrapped_keys=pending.wrapped_keys,
         copies_authorized=pending.copies_authorized,
         expires_at=pending.expires_at
     )
@@ -355,3 +414,83 @@ async def get_document(
     resp.download_url = download_url
     resp.download_expires_in = settings.PRESIGNED_URL_EXPIRE_SECONDS
     return resp
+
+
+@router.get("/{document_id}/print-content")
+async def get_print_content(
+    document_id: str,
+    job_id: str,
+    db: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_user),
+    storage: StorageService = Depends(get_storage_service),
+) -> Response:
+    if principal.role != UserRole.PRINT_DEVICE or not principal.user_id:
+        raise PrivPrintException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code=ErrorCode.FORBIDDEN,
+            message="Only an authenticated print station can retrieve print content",
+        )
+
+    job_result = await db.execute(
+        select(PrintJob).where(
+            PrintJob.id == job_id,
+            PrintJob.document_id == document_id,
+            PrintJob.shop_id == principal.shop_id,
+            PrintJob.status.in_([PrintJobStatus.AUTHORIZED.value, PrintJobStatus.PRINTING.value]),
+        )
+    )
+    job = job_result.scalar_one_or_none()
+    document = await DocumentRepository(db).get_by_id(document_id)
+    if (
+        not job
+        or not document
+        or document.session_id != job.session_id
+        or document.user_id != job.user_id
+    ):
+        raise PrivPrintException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code=ErrorCode.NOT_FOUND,
+            message="Authorized print content not found",
+        )
+
+    expires_at = job.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < datetime.now(timezone.utc):
+        raise PrivPrintException(
+            status_code=status.HTTP_410_GONE,
+            code=ErrorCode.JOB_EXPIRED,
+            message="Authorized print job has expired",
+        )
+
+    device = await db.get(Device, principal.user_id)
+    wrapped_key = (document.wrapped_keys or {}).get(principal.user_id)
+    if not device or not device.is_active or device.shop_id != job.shop_id or not wrapped_key:
+        raise PrivPrintException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code=ErrorCode.FORBIDDEN,
+            message="This station has no wrapped key for the requested document",
+        )
+
+    ciphertext = storage.get_object_data(document.storage_path)
+
+    if (
+        len(ciphertext) != document.file_size_bytes
+        or hashlib.sha256(ciphertext).hexdigest() != document.sha256_hash.lower()
+    ):
+        raise PrivPrintException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code=ErrorCode.VALIDATION_ERROR,
+            message="Stored ciphertext failed integrity validation",
+        )
+
+    return Response(
+        content=ciphertext,
+        media_type="application/octet-stream",
+        headers={
+            "X-PrivPrint-Wrapped-Key": wrapped_key,
+            "X-PrivPrint-IV": document.iv_hex,
+            "X-PrivPrint-SHA256": document.sha256_hash,
+            "X-PrivPrint-Filename": quote(document.filename, safe=""),
+        },
+    )

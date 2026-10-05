@@ -1,9 +1,12 @@
 import uuid
 import secrets
+import base64
 from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from cryptography.hazmat.primitives.serialization import load_der_public_key
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 
 from app.core.config import settings
 from app.core.exceptions import PrivPrintException, ErrorCode
@@ -19,10 +22,55 @@ from app.schemas.shop import (
     DeviceRegisterResponse,
     DeviceAuthenticateRequest,
     DeviceResponse,
+    DevicePrintKeyRequest,
 )
 from app.api.deps import get_current_user, require_roles, AuthPrincipal
 
 router = APIRouter()
+
+
+@router.put("/{device_id}/print-key", status_code=status.HTTP_204_NO_CONTENT)
+async def register_device_print_key(
+    device_id: str,
+    payload: DevicePrintKeyRequest,
+    db: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(require_roles([UserRole.PRINT_DEVICE])),
+) -> None:
+    if principal.user_id != device_id:
+        raise PrivPrintException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code=ErrorCode.FORBIDDEN,
+            message="A station can register only its own encryption key",
+        )
+
+    try:
+        public_key_der = base64.b64decode(payload.public_key, validate=True)
+        public_key = load_der_public_key(public_key_der)
+    except (ValueError, TypeError) as exc:
+        raise PrivPrintException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code=ErrorCode.VALIDATION_ERROR,
+            message="Invalid station public key",
+        ) from exc
+
+    if not isinstance(public_key, RSAPublicKey) or public_key.key_size < 2048:
+        raise PrivPrintException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code=ErrorCode.VALIDATION_ERROR,
+            message="Station public key must be RSA with at least 2048 bits",
+        )
+
+    device = await DeviceRepository(db).get_by_id(device_id)
+    if not device or not device.is_active:
+        raise PrivPrintException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code=ErrorCode.NOT_FOUND,
+            message="Active station not found",
+        )
+
+    device.encryption_public_key = payload.public_key
+    device.last_seen_at = datetime.now(timezone.utc)
+    await db.commit()
 
 
 @router.post("/register", response_model=DeviceRegisterResponse, status_code=status.HTTP_201_CREATED)
@@ -301,4 +349,3 @@ async def check_stale_devices(
         "marked_stale_count": len(marked_stale),
         "stale_device_ids": marked_stale
     }
-

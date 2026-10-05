@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Dict, Optional
 from datetime import datetime
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -11,6 +11,7 @@ class InitUploadRequest(BaseModel):
     sha256_hash: str = Field(..., min_length=64, max_length=64)
     iv_hex: str = Field(..., min_length=16)
     key_fingerprint: str = Field(..., min_length=8)
+    wrapped_keys: Dict[str, str] = Field(default_factory=dict, max_length=64)
     copies_authorized: int = Field(default=1, ge=1, le=100)
 
 

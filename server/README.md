@@ -45,9 +45,13 @@ their country code (E.164 format, for example `+919876543210`).
 
 ## Windows agent scope
 
-The Windows terminal implementation currently lives in the Android module as
-`WindowsTerminalServer`. It is a local LAN print-station server, not a separately
-deployable Windows service. Production device authentication and heartbeats use
-the backend `/api/v1/devices` endpoints; a production Windows deployment must
-run a dedicated agent process that stores the returned device API key securely
-and never expose the local server outside the shop LAN.
+The Android module's `WindowsTerminalServer` is a local LAN print-station
+server. The standalone Windows station agent is in `windows_agent/` and uses
+the backend `/api/v1/devices` endpoints for authentication and heartbeats.
+
+The station registers an RSA public key and protects its private key with
+Windows DPAPI. Android wraps each document's AES key for registered stations;
+the backend returns ciphertext only to the matching authenticated station for
+an authorized, unexpired job. Apply the Alembic migration at
+`a31f0de29c7b` and deploy the updated Windows station and Android client
+together before enabling this transfer flow in production.

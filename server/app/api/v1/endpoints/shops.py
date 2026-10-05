@@ -7,12 +7,46 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import PrivPrintException, ErrorCode
 from app.models.base import get_db_session
 from app.models.enums import UserRole
-from app.models.entities import Shop
+from app.models.entities import Device, Shop
 from app.repositories.shop_repo import ShopRepository, PrinterRepository
-from app.schemas.shop import ShopResponse, PermanentQrResponse, ShopCreateRequest, NearbyShopResponse, PrinterResponse
+from app.schemas.shop import (
+    DevicePrintKeyResponse,
+    ShopResponse,
+    PermanentQrResponse,
+    ShopCreateRequest,
+    NearbyShopResponse,
+    PrinterResponse,
+)
 from app.api.deps import get_current_user, require_roles, AuthPrincipal
 
 router = APIRouter()
+
+
+@router.get("/{shop_id}/print-keys", response_model=List[DevicePrintKeyResponse])
+async def get_shop_print_keys(
+    shop_id: str,
+    db: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_user),
+) -> List[DevicePrintKeyResponse]:
+    shop = await ShopRepository(db).get_by_id(shop_id)
+    if not shop or shop.status != "ACTIVE" or not shop.is_verified:
+        raise PrivPrintException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code=ErrorCode.NOT_FOUND,
+            message="Active verified shop not found",
+        )
+
+    result = await db.execute(
+        select(Device).where(
+            Device.shop_id == shop_id,
+            Device.is_active.is_(True),
+            Device.encryption_public_key.isnot(None),
+        )
+    )
+    return [
+        DevicePrintKeyResponse(device_id=device.id, public_key=device.encryption_public_key)
+        for device in result.scalars().all()
+    ]
 
 
 def calculate_haversine_distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
