@@ -58,7 +58,10 @@ class Settings(BaseSettings):
 
     # Development OTP backdoor (fixed code 123456).
     # NEVER enable on a publicly reachable deployment: anyone could log in as any phone number.
-    DEVELOPMENT_OTP_ENABLED: bool = True
+    DEVELOPMENT_OTP_ENABLED: bool = Field(
+        default_factory=lambda data: data.get("ENVIRONMENT") != EnvironmentType.PRODUCTION,
+        description="Enable the fixed development OTP only outside production",
+    )
 
     # Twilio Verify (credentials are supplied by the deployment secret store)
     TWILIO_ACCOUNT_SID: str = ""

@@ -59,6 +59,15 @@ def test_production_configuration_accepts_secure_remote_dependencies():
     assert settings.ENVIRONMENT == EnvironmentType.PRODUCTION
 
 
+def test_production_defaults_development_otp_to_disabled():
+    values = _valid_production_settings()
+    del values["DEVELOPMENT_OTP_ENABLED"]
+
+    settings = Settings(**values)
+
+    assert settings.DEVELOPMENT_OTP_ENABLED is False
+
+
 @pytest.mark.parametrize(
     "database_url",
     [

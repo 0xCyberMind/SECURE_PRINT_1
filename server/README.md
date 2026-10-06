@@ -56,6 +56,28 @@ backend and HTTPS `/healthz` responds successfully. The Compose Nginx and
 Certbot instructions below apply to a host you operate; they do not configure
 Render's custom-domain routing or certificates.
 
+### Render environment settings
+
+Render must provide an authenticated remote Redis connection URL as
+`REDIS_URL` (for example, a private Redis URL in the form
+`redis://:<password>@<host>:<port>/<db>` or a TLS URL beginning with `rediss://`).
+Use the connection string from the Redis service and store it as a secret; do
+not paste credentials into source control. The URL must include a password.
+The application intentionally refuses to start in production without it
+because the production rate limiter and realtime features depend on Redis.
+
+Set `ENVIRONMENT=production` and `DEBUG=false`. The development OTP flag now
+defaults to disabled automatically in production; if set explicitly, it must
+be `false`. Keep `SECRET_KEY`, `DATABASE_URL`, all three Twilio Verify
+credentials, and HTTPS object-storage credentials configured in Render's
+environment/secrets. If startup logs report
+`DEVELOPMENT_OTP_ENABLED must be false`, set that variable to `false` on the
+service and redeploy. If they report
+`REDIS_URL must target a remote Redis service with authentication`, attach or
+provision an authenticated Redis service, then set `REDIS_URL` to its
+credential-bearing private connection URL and redeploy. Do not disable the
+production validation to work around missing services.
+
 Create a private production environment file from the placeholder-only sample:
 
 ```bash
