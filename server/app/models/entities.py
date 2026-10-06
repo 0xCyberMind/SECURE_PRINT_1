@@ -123,6 +123,7 @@ class Session(Base, TimestampMixin):
     token = Column(String(128), unique=True, nullable=False, index=True)
     nonce = Column(String(64), nullable=False, default=lambda: uuid.uuid4().hex)
     status = Column(String(32), default=SessionStatus.ACTIVE.value, nullable=False, index=True)
+    retention_hours = Column(Integer, default=2, nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
 
     # Relationships
@@ -138,6 +139,7 @@ class Document(Base, TimestampMixin):
     id = Column(String(64), primary_key=True, default=lambda: f"DOC-{uuid.uuid4().hex[:8].upper()}")
     user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     session_id = Column(String(64), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    batch_id = Column(String(64), nullable=True, index=True)
     filename = Column(String(255), nullable=False)
     storage_path = Column(String(512), nullable=False)
     file_size_bytes = Column(BigInteger, nullable=False)
@@ -149,6 +151,7 @@ class Document(Base, TimestampMixin):
     wrapped_keys = Column(JSON, nullable=True)
     copies_authorized = Column(Integer, default=1, nullable=False)
     copies_consumed = Column(Integer, default=0, nullable=False)
+    retention_hours = Column(Integer, default=2, nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     cleanup_state = Column(String(32), default=CleanupState.PENDING.value, nullable=False, index=True)
     is_deleted = Column(Boolean, default=False, nullable=False)
@@ -156,7 +159,9 @@ class Document(Base, TimestampMixin):
     __table_args__ = (
         CheckConstraint("copies_consumed >= 0", name="chk_doc_copies_consumed_positive"),
         CheckConstraint("copies_consumed <= copies_authorized", name="chk_doc_copies_consumed_limit"),
+        CheckConstraint("retention_hours >= 1 AND retention_hours <= 24", name="chk_doc_retention_range"),
         Index("idx_doc_user_cleanup", "user_id", "cleanup_state"),
+        Index("idx_doc_batch", "batch_id"),
     )
 
     # Relationships
@@ -172,6 +177,7 @@ class PendingUpload(Base, TimestampMixin):
     document_id = Column(String(64), nullable=False)
     user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     session_id = Column(String(64), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    batch_id = Column(String(64), nullable=True, index=True)
     filename = Column(String(255), nullable=False)
     storage_path = Column(String(512), nullable=False)
     file_size_bytes = Column(BigInteger, nullable=False)
@@ -181,6 +187,7 @@ class PendingUpload(Base, TimestampMixin):
     key_fingerprint = Column(String(128), nullable=False)
     wrapped_keys = Column(JSON, nullable=True)
     copies_authorized = Column(Integer, default=1, nullable=False)
+    retention_hours = Column(Integer, default=2, nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     status = Column(String(32), default="PENDING", nullable=False)
 
@@ -194,10 +201,15 @@ class PrintJob(Base, TimestampMixin):
     session_id = Column(String(64), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False, index=True)
     document_id = Column(String(64), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True)
     printer_id = Column(String(64), ForeignKey("printers.id", ondelete="SET NULL"), nullable=True, index=True)
+    batch_id = Column(String(64), nullable=True, index=True)
+    file_index = Column(Integer, default=0, nullable=False)
+    total_files = Column(Integer, default=1, nullable=False)
 
     page_count = Column(Integer, default=1, nullable=False)
+    pages_printed = Column(Integer, default=0, nullable=False)
     requested_copies = Column(Integer, default=1, nullable=False)
     completed_copies = Column(Integer, default=0, nullable=False)
+    retention_hours = Column(Integer, default=2, nullable=False)
     status = Column(String(32), default=PrintJobStatus.CREATED.value, nullable=False, index=True)
     idempotency_key = Column(String(128), nullable=True, index=True)
     color_mode = Column(String(32), default="MONOCHROME", nullable=False)
@@ -211,8 +223,11 @@ class PrintJob(Base, TimestampMixin):
     __table_args__ = (
         CheckConstraint("completed_copies >= 0", name="chk_job_completed_copies_positive"),
         CheckConstraint("completed_copies <= requested_copies", name="chk_job_completed_copies_limit"),
+        CheckConstraint("pages_printed >= 0", name="chk_job_pages_printed_positive"),
+        CheckConstraint("retention_hours >= 1 AND retention_hours <= 24", name="chk_job_retention_range"),
         Index("idx_job_shop_status", "shop_id", "status"),
         Index("idx_job_user_status", "user_id", "status"),
+        Index("idx_job_batch", "batch_id"),
     )
 
     # Relationships

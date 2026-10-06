@@ -85,6 +85,13 @@ class Settings(BaseSettings):
     ]
     ALLOWED_EXTENSIONS: List[str] = [".pdf", ".png", ".jpg", ".jpeg", ".enc"]
 
+    # Retention & Multi-File Batching
+    DEFAULT_RETENTION_HOURS: int = 2
+    MIN_RETENTION_HOURS: int = 1
+    MAX_RETENTION_HOURS: int = 24
+    MAX_BATCH_FILES: int = 10
+    MAX_BATCH_SIZE_BYTES: int = 50 * 1024 * 1024  # 50 MB batch limit
+
     # CORS
     CORS_ORIGINS: Union[List[str], str] = [
         "http://localhost:3000",

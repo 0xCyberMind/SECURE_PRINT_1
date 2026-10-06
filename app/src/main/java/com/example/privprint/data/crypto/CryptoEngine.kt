@@ -161,4 +161,46 @@ object CryptoEngine {
             }
         }
     }
+
+    data class BatchFileEncryptionResult(
+        val documentName: String,
+        val mimeType: String,
+        val pageCount: Int,
+        val originalSizeBytes: Long,
+        val encryptionResult: EncryptionResult
+    )
+
+    data class BatchEncryptionResult(
+        val batchId: String,
+        val files: List<BatchFileEncryptionResult>
+    ) {
+        fun zeroizeAllKeys() {
+            files.forEach { it.encryptionResult.zeroizeKey() }
+        }
+    }
+
+    /**
+     * Encrypts a collection of documents in a batch, generating an independent 256-bit AES
+     * key and fresh 96-bit IV for every single document.
+     */
+    fun encryptBatch(
+        documents: List<com.example.privprint.data.model.SelectedDocument>,
+        batchId: String = "BAT-${java.util.UUID.randomUUID().toString().take(8).uppercase()}"
+    ): BatchEncryptionResult {
+        val encryptedFiles = documents.map { doc ->
+            val encResult = encryptDocument(doc.rawBytes)
+            BatchFileEncryptionResult(
+                documentName = doc.name,
+                mimeType = doc.mimeType,
+                pageCount = doc.pageCount,
+                originalSizeBytes = doc.sizeBytes,
+                encryptionResult = encResult
+            )
+        }
+        return BatchEncryptionResult(
+            batchId = batchId,
+            files = encryptedFiles
+        )
+    }
 }
+

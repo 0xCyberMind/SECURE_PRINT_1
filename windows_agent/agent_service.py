@@ -59,6 +59,7 @@ class WindowsAgentService:
         self._operator_token: Optional[str] = None
         self._pending_operator_shops: Dict[str, Dict[str, str]] = {}
         self.active_jobs: Dict[str, Dict[str, Any]] = {}
+        self._processing_job_ids = set()
         self.job_history: List[Dict[str, Any]] = []
         self.audit_log: List[Dict[str, Any]] = []
         self._station_private_key = None
@@ -408,7 +409,7 @@ class WindowsAgentService:
 
             # 4. Fetch Pending Jobs (Missed Event Recovery)
             queue = []
-            if self.config.access_token:
+            if self.config.access_token or self.config.shop_id:
                 try:
                     queue = await self.api_client.get_print_queue(self.config.shop_id)
                     self.log_audit("QUEUE_RECONCILED", f"Fetched authoritative queue: {len(queue)} job(s)")
@@ -476,9 +477,10 @@ class WindowsAgentService:
             key_buf[:] = b"\x00" * len(key_buf)
 
     async def process_print_job(self, job_id: str):
-        if job_id in self.active_jobs:
+        if job_id in self.active_jobs or job_id in self._processing_job_ids:
             return
 
+        self._processing_job_ids.add(job_id)
         target_job: Optional[Dict[str, Any]] = None
         decrypted_doc: Optional[bytearray] = None
         try:
@@ -489,8 +491,13 @@ class WindowsAgentService:
                 raise RuntimeError(f"Authorized print job {job_id} was not found in the shop queue")
 
             job_status = target_job.get("status")
-            if job_status not in ("AUTHORIZED", "PRINTING"):
-                raise SpoolerFailureError(f"Job {job_id} is in invalid state: {job_status}")
+            if job_status != "AUTHORIZED":
+                self.log_audit(
+                    "JOB_IGNORED",
+                    f"Skipping duplicate or stale event for {job_id}; cloud job is {job_status or 'UNKNOWN'}",
+                    severity="WARNING" if job_status == "PRINTING" else "INFO",
+                )
+                return
 
             copies = (
                 target_job.get("requested_copies")
@@ -508,14 +515,17 @@ class WindowsAgentService:
             if not self.config.device_id:
                 raise SpoolerPermissionError("Station device identity is not configured")
 
-            target_printer_id = target_job.get("printerId") or target_job.get("printer_id") or "PRN-HP-01"
+            self.active_jobs[job_id] = target_job
+            await self.api_client.start_printing(job_id)
+            target_job["status"] = "PRINTING"
+
+            requested_printer_id = target_job.get("printerId") or target_job.get("printer_id")
+            target_printer_id = self.spooler.resolve_printer_id(requested_printer_id)
             validated_printer = self.spooler.validate_printer_for_job(target_printer_id)
             self.log_audit(
                 "PRINTER_VALIDATED",
                 f"Target printer validated: {validated_printer['name']} ({validated_printer['status']})"
             )
-
-            self.active_jobs[job_id] = target_job
 
             document_id = target_job.get("documentId") or target_job.get("document_id")
             if not document_id:
@@ -526,8 +536,6 @@ class WindowsAgentService:
             decrypted_doc = self._ephemeral_decrypt(encrypted_content)
             self.log_audit("EPHEMERAL_DECRYPTION", f"Decrypted payload into RAM for job {job_id}")
 
-            await self.api_client.start_printing(job_id)
-            target_job["status"] = "PRINTING"
             filename = unquote(encrypted_content["filename"] or "Document.pdf")
 
             def on_spool_progress(copy_num: int, total: int, state: str):
@@ -588,6 +596,7 @@ class WindowsAgentService:
         finally:
             if decrypted_doc is not None:
                 decrypted_doc[:] = b"\x00" * len(decrypted_doc)
+            self._processing_job_ids.discard(job_id)
 
     async def _heartbeat_rest_loop(self):
         """

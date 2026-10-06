@@ -88,6 +88,7 @@ data class UserUiState(
     val currentScreen: UserScreen = UserScreen.HOME,
     val selectedShop: Shop? = null,
     val selectedDocument: SelectedDocument? = null,
+    val selectedDocuments: List<SelectedDocument> = emptyList(),
     val printSettings: PrintSettings = PrintSettings(),
     val scannerError: String? = null,
     val manualCodeInput: String = "",
@@ -607,9 +608,41 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
     // --- Document Selection ---
 
     fun selectDocument(doc: SelectedDocument) {
+        selectDocuments(listOf(doc))
+    }
+
+    fun selectDocuments(docs: List<SelectedDocument>) {
         _userUiState.value = _userUiState.value.copy(
-            selectedDocument = doc,
+            selectedDocument = docs.firstOrNull(),
+            selectedDocuments = docs,
             currentScreen = UserScreen.PRINT_SETTINGS
+        )
+    }
+
+    fun addDocument(doc: SelectedDocument) {
+        val currentList = _userUiState.value.selectedDocuments.toMutableList()
+        if (!currentList.contains(doc)) {
+            currentList.add(doc)
+            _userUiState.value = _userUiState.value.copy(
+                selectedDocument = currentList.firstOrNull(),
+                selectedDocuments = currentList
+            )
+        }
+    }
+
+    fun removeDocument(doc: SelectedDocument) {
+        val currentList = _userUiState.value.selectedDocuments.toMutableList()
+        currentList.remove(doc)
+        _userUiState.value = _userUiState.value.copy(
+            selectedDocument = currentList.firstOrNull(),
+            selectedDocuments = currentList
+        )
+    }
+
+    fun clearDocuments() {
+        _userUiState.value = _userUiState.value.copy(
+            selectedDocument = null,
+            selectedDocuments = emptyList()
         )
     }
 

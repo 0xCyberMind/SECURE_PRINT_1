@@ -33,7 +33,6 @@ class AgentConfig:
     auto_print_enabled: bool = True
     heartbeat_interval_sec: int = 15
     reconnect_delay_sec: int = 5
-    dashboard_port: int = 8888
     log_level: str = "INFO"
 
     @classmethod
@@ -58,7 +57,6 @@ class AgentConfig:
             "auto_print_enabled": self.auto_print_enabled,
             "heartbeat_interval_sec": self.heartbeat_interval_sec,
             "reconnect_delay_sec": self.reconnect_delay_sec,
-            "dashboard_port": self.dashboard_port,
             "log_level": self.log_level
         }
         with open(path, "w", encoding="utf-8") as f:

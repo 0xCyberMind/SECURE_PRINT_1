@@ -288,6 +288,7 @@ fun PrivPrintApp(viewModel: PrivPrintViewModel) {
 
                                 UserScreen.DOCUMENT_PICKER -> DocumentPickerScreen(
                                     onDocumentSelected = { viewModel.selectDocument(it) },
+                                    onDocumentsSelected = { viewModel.selectDocuments(it) },
                                     onBack = { viewModel.navigateToUserScreen(UserScreen.SHOP_CONNECTED) }
                                 )
 
@@ -295,6 +296,7 @@ fun PrivPrintApp(viewModel: PrivPrintViewModel) {
                                     userUiState.selectedDocument?.let { doc ->
                                         PrintSettingsScreen(
                                             document = doc,
+                                            documents = userUiState.selectedDocuments.ifEmpty { listOf(doc) },
                                             settings = userUiState.printSettings,
                                             onUpdateCopies = { viewModel.updateCopies(it) },
                                             onUpdateColor = { viewModel.updateColorMode(it) },

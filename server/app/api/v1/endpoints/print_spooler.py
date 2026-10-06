@@ -6,8 +6,9 @@ from app.core.exceptions import PrivPrintException, ErrorCode
 from app.models.base import get_db_session
 from app.models.enums import UserRole, PrintJobStatus
 from app.repositories.print_job_repo import PrintJobRepository
-from app.schemas.print_job import JobResponse
+from app.schemas.print_job import JobResponse, JobProgressUpdateRequest
 from app.api.deps import require_roles, AuthPrincipal
+from app.services.redis_service import get_redis_service
 
 router = APIRouter()
 
@@ -65,7 +66,63 @@ async def start_printing(
     job_repo.validate_transition(job.status, PrintJobStatus.PRINTING.value)
     job.status = PrintJobStatus.PRINTING.value
     await db.commit()
+
+    redis_service = get_redis_service()
+    event_payload = {
+        "job_id": job.id,
+        "batch_id": job.batch_id,
+        "file_index": job.file_index,
+        "total_files": job.total_files,
+        "page_count": job.page_count,
+        "pages_printed": job.pages_printed,
+        "status": job.status
+    }
+    await redis_service.publish_job_event(job.id, "PRINT_STARTED", event_payload)
+    await redis_service.publish_user_event(job.user_id, "PRINT_STARTED", event_payload)
+    await redis_service.publish_shop_event(job.shop_id, "PRINT_STARTED", event_payload)
+
     return JobResponse.model_validate(job)
+
+
+@router.post("/jobs/{job_id}/progress", response_model=JobResponse)
+async def update_job_progress(
+    job_id: str,
+    payload: JobProgressUpdateRequest,
+    db: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(require_roles([UserRole.SHOP_OPERATOR, UserRole.PRINT_DEVICE, UserRole.ADMIN]))
+) -> JobResponse:
+    job_repo = PrintJobRepository(db)
+    job = await job_repo.get_by_id(job_id)
+    if not job:
+        raise PrivPrintException(status_code=404, code=ErrorCode.NOT_FOUND, message="Job not found")
+
+    if principal.shop_id and job.shop_id != principal.shop_id:
+        raise PrivPrintException(status_code=403, code=ErrorCode.FORBIDDEN, message="Wrong shop: device unauthorized")
+
+    updated_job = await job_repo.update_page_progress_atomic(job_id, payload.pages_printed)
+    if payload.completed_copies is not None and payload.completed_copies > updated_job.completed_copies:
+        delta = payload.completed_copies - updated_job.completed_copies
+        updated_job = await job_repo.increment_copies_atomic(job_id, delta=delta)
+
+    await db.commit()
+
+    redis_service = get_redis_service()
+    progress_payload = {
+        "job_id": updated_job.id,
+        "batch_id": updated_job.batch_id,
+        "file_index": updated_job.file_index,
+        "total_files": updated_job.total_files,
+        "page_count": updated_job.page_count,
+        "pages_printed": updated_job.pages_printed,
+        "requested_copies": updated_job.requested_copies,
+        "completed_copies": updated_job.completed_copies,
+        "status": updated_job.status
+    }
+    await redis_service.publish_job_event(updated_job.id, "JOB_PROGRESS", progress_payload)
+    await redis_service.publish_user_event(updated_job.user_id, "JOB_PROGRESS", progress_payload)
+    await redis_service.publish_shop_event(updated_job.shop_id, "JOB_PROGRESS", progress_payload)
+
+    return JobResponse.model_validate(updated_job)
 
 
 @router.post("/jobs/{job_id}/increment-copy", response_model=JobResponse)

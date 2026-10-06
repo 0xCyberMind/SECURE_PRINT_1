@@ -312,6 +312,77 @@ class PrinterSpoolerManager:
                 return simulated
         return None
 
+    def resolve_printer_id(self, printer_id: Optional[str]) -> str:
+        if not self._is_windows():
+            return printer_id or "PRN-HP-01"
+
+        printers = self.discover_local_printers()
+        virtual_ids = {printer["id"] for printer in self.virtual_printers}
+        physical_printers = [
+            printer
+            for printer in printers
+            if printer.get("id") not in virtual_ids
+            and not self._is_document_output_printer(printer)
+        ]
+        usable_printers = physical_printers if physical_printers else [
+            printer
+            for printer in printers
+            if not self._is_document_output_printer(printer)
+        ] or printers
+
+        if printer_id:
+            match = next(
+                (
+                    printer for printer in usable_printers
+                    if printer.get("id") == printer_id
+                    or printer.get("name") == printer_id
+                    or (
+                        self.identity_namespace
+                        and printer_id == self._generate_legacy_id(printer)
+                    )
+                ),
+                None,
+            )
+            if match:
+                return str(match["id"])
+            if printer_id not in virtual_ids:
+                raise PrinterRemovedError(
+                    f"Printer {printer_id} is not installed on this Windows station"
+                )
+
+        default_printer = next(
+            (
+                printer for printer in usable_printers
+                if printer.get("is_default")
+                and printer.get("status") != "OFFLINE"
+                and printer.get("is_online", True)
+            ),
+            None,
+        )
+        if default_printer:
+            return str(default_printer["id"])
+
+        if not usable_printers:
+            raise PrinterUnavailableError(
+                "No usable Windows printer is installed. Install and connect the shop printer, "
+                "then set it as the Windows default printer."
+            )
+        raise PrinterUnavailableError(
+            "No default Windows printer is selected. Set the shop printer as the Windows default "
+            "printer, then retry this job."
+        )
+
+    @staticmethod
+    def _is_document_output_printer(printer: Dict[str, Any]) -> bool:
+        identity = " ".join(
+            str(printer.get(field) or "")
+            for field in ("name", "model", "driver_name")
+        ).casefold()
+        return any(
+            marker in identity
+            for marker in ("print to pdf", "pdf writer", "xps document", "onenote", "fax")
+        )
+
     @staticmethod
     def _generate_legacy_id(printer: Dict[str, Any]) -> str:
         identity = f"{printer['name']}:{printer.get('connection_info') or 'LOCAL'}"

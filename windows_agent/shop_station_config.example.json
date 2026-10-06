@@ -9,6 +9,5 @@
   "auto_print_enabled": true,
   "heartbeat_interval_sec": 15,
   "reconnect_delay_sec": 5,
-  "dashboard_port": 8888,
   "log_level": "INFO"
 }

@@ -20,6 +20,8 @@ from app.repositories.document_repo import DocumentRepository
 from app.schemas.document import (
     InitUploadRequest,
     InitUploadResponse,
+    BatchInitUploadRequest,
+    BatchInitUploadResponse,
     CompleteUploadRequest,
     DocumentResponse,
 )
@@ -168,6 +170,7 @@ async def init_upload(
         document_id=doc_id,
         user_id=principal.user_id,
         session_id=session.id,
+        batch_id=payload.batch_id,
         filename=payload.filename,
         storage_path=storage_path,
         file_size_bytes=payload.file_size_bytes,
@@ -177,6 +180,7 @@ async def init_upload(
         key_fingerprint=payload.key_fingerprint,
         wrapped_keys=payload.wrapped_keys,
         copies_authorized=payload.copies_authorized,
+        retention_hours=payload.retention_hours,
         expires_at=session.expires_at,
         status="PENDING"
     )
@@ -188,8 +192,155 @@ async def init_upload(
         document_id=doc_id,
         storage_path=storage_path,
         presigned_upload_url=presigned_url,
-        expires_in_seconds=settings.PRESIGNED_URL_EXPIRE_SECONDS
+        expires_in_seconds=settings.PRESIGNED_URL_EXPIRE_SECONDS,
+        batch_id=payload.batch_id
     )
+
+
+@router.post(
+    "/batch-init-upload",
+    response_model=BatchInitUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(RateLimiter("upload_init", settings.RATE_LIMIT_UPLOAD_INIT_MAX, settings.RATE_LIMIT_UPLOAD_INIT_WINDOW_SECONDS))]
+)
+async def batch_init_upload(
+    payload: BatchInitUploadRequest,
+    db: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_user),
+    storage: StorageService = Depends(get_storage_service)
+) -> BatchInitUploadResponse:
+    # 1. Validate Authenticated User
+    if not principal.user_id:
+        raise PrivPrintException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code=ErrorCode.AUTH_INVALID,
+            message="Authenticated user required to upload documents"
+        )
+
+    # 2. Validate Session Ownership & Expiry
+    session_repo = SessionRepository(db)
+    session = await session_repo.get_by_id(payload.session_id)
+    if not session:
+        raise PrivPrintException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code=ErrorCode.NOT_FOUND,
+            message=f"Session {payload.session_id} not found"
+        )
+    if session.user_id and session.user_id != principal.user_id:
+        raise PrivPrintException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code=ErrorCode.FORBIDDEN,
+            message="Session ownership mismatch: you can only upload to your own session"
+        )
+
+    sess_exp = session.expires_at if session.expires_at.tzinfo else session.expires_at.replace(tzinfo=timezone.utc)
+    if sess_exp < datetime.now(timezone.utc):
+        raise PrivPrintException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code=ErrorCode.VALIDATION_ERROR,
+            message="Session has expired. Please rescan shop QR code."
+        )
+
+    # 3. Validate Batch Constraints
+    if len(payload.files) > settings.MAX_BATCH_FILES:
+        raise PrivPrintException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code=ErrorCode.VALIDATION_ERROR,
+            message=f"Batch file limit exceeded. Maximum {settings.MAX_BATCH_FILES} files allowed per batch."
+        )
+
+    total_batch_bytes = sum(f.file_size_bytes for f in payload.files)
+    if total_batch_bytes > settings.MAX_BATCH_SIZE_BYTES:
+        raise PrivPrintException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code=ErrorCode.VALIDATION_ERROR,
+            message=f"Batch size limit exceeded. Maximum {settings.MAX_BATCH_SIZE_BYTES // (1024 * 1024)} MB allowed per batch."
+        )
+
+    # Retrieve active shop stations for key validation
+    active_device_result = await db.execute(
+        select(Device).where(
+            Device.shop_id == session.shop_id,
+            Device.is_active.is_(True),
+            Device.encryption_public_key.isnot(None),
+        )
+    )
+    active_devices = {device.id: device for device in active_device_result.scalars().all()}
+
+    batch_id = payload.batch_id or f"BAT-{uuid.uuid4().hex[:8].upper()}"
+    uploads: list[InitUploadResponse] = []
+
+    for file_item in payload.files:
+        if file_item.file_size_bytes <= 0 or file_item.file_size_bytes > settings.MAX_FILE_SIZE_BYTES:
+            raise PrivPrintException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code=ErrorCode.VALIDATION_ERROR,
+                message=f"Invalid file size for '{file_item.filename}'. Must be <= 25MB."
+            )
+        validate_file_type(file_item.filename, file_item.mime_type)
+        if not is_valid_sha256(file_item.sha256_hash):
+            raise PrivPrintException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code=ErrorCode.VALIDATION_ERROR,
+                message=f"Invalid SHA-256 checksum for '{file_item.filename}'."
+            )
+
+        if file_item.wrapped_keys and active_devices:
+            if set(file_item.wrapped_keys) != set(active_devices):
+                raise PrivPrintException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    code=ErrorCode.VALIDATION_ERROR,
+                    message=f"Document '{file_item.filename}' key must be wrapped for every active station in this shop."
+                )
+
+        upload_id = f"upl_{uuid.uuid4().hex}"
+        doc_id = f"DOC-{uuid.uuid4().hex[:8].upper()}"
+        storage_path = f"ciphertext/{principal.user_id}/{payload.session_id}/{doc_id}.enc"
+
+        presigned_url = storage.generate_presigned_upload_url(
+            storage_path,
+            expires_in=settings.PRESIGNED_URL_EXPIRE_SECONDS
+        )
+
+        pending = PendingUpload(
+            id=upload_id,
+            document_id=doc_id,
+            user_id=principal.user_id,
+            session_id=session.id,
+            batch_id=batch_id,
+            filename=file_item.filename,
+            storage_path=storage_path,
+            file_size_bytes=file_item.file_size_bytes,
+            mime_type=file_item.mime_type,
+            sha256_hash=file_item.sha256_hash.lower(),
+            iv_hex=file_item.iv_hex,
+            key_fingerprint=file_item.key_fingerprint,
+            wrapped_keys=file_item.wrapped_keys,
+            copies_authorized=file_item.copies_authorized,
+            retention_hours=payload.retention_hours,
+            expires_at=session.expires_at,
+            status="PENDING"
+        )
+        db.add(pending)
+
+        uploads.append(
+            InitUploadResponse(
+                upload_id=upload_id,
+                document_id=doc_id,
+                storage_path=storage_path,
+                presigned_upload_url=presigned_url,
+                expires_in_seconds=settings.PRESIGNED_URL_EXPIRE_SECONDS,
+                batch_id=batch_id
+            )
+        )
+
+    await db.commit()
+
+    return BatchInitUploadResponse(
+        batch_id=batch_id,
+        uploads=uploads
+    )
+
 
 
 @router.post(
@@ -354,6 +505,8 @@ async def complete_upload(
         key_fingerprint=pending.key_fingerprint,
         wrapped_keys=pending.wrapped_keys,
         copies_authorized=pending.copies_authorized,
+        batch_id=pending.batch_id,
+        retention_hours=pending.retention_hours,
         expires_at=pending.expires_at
     )
 

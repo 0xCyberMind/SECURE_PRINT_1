@@ -21,7 +21,6 @@ try {
         --specpath $workDir `
         --hidden-import win32crypt `
         --hidden-import win32print `
-        --collect-all uvicorn `
         --collect-all websockets `
         --collect-all cryptography `
         $entryPoint

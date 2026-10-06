@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 from datetime import datetime
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -13,6 +13,8 @@ class InitUploadRequest(BaseModel):
     key_fingerprint: str = Field(..., min_length=8)
     wrapped_keys: Dict[str, str] = Field(default_factory=dict, max_length=64)
     copies_authorized: int = Field(default=1, ge=1, le=100)
+    batch_id: Optional[str] = None
+    retention_hours: int = Field(default=2, ge=1, le=24)
 
 
 class InitUploadResponse(BaseModel):
@@ -21,6 +23,30 @@ class InitUploadResponse(BaseModel):
     storage_path: str
     presigned_upload_url: str
     expires_in_seconds: int = 300
+    batch_id: Optional[str] = None
+
+
+class BatchInitUploadItem(BaseModel):
+    filename: str = Field(..., min_length=1, max_length=255)
+    file_size_bytes: int = Field(..., gt=0)
+    mime_type: str = Field(default="application/pdf")
+    sha256_hash: str = Field(..., min_length=64, max_length=64)
+    iv_hex: str = Field(..., min_length=16)
+    key_fingerprint: str = Field(..., min_length=8)
+    wrapped_keys: Dict[str, str] = Field(default_factory=dict, max_length=64)
+    copies_authorized: int = Field(default=1, ge=1, le=100)
+
+
+class BatchInitUploadRequest(BaseModel):
+    session_id: str
+    batch_id: Optional[str] = None
+    retention_hours: int = Field(default=2, ge=1, le=24)
+    files: List[BatchInitUploadItem] = Field(..., min_length=1, max_length=10)
+
+
+class BatchInitUploadResponse(BaseModel):
+    batch_id: str
+    uploads: List[InitUploadResponse]
 
 
 class CompleteUploadRequest(BaseModel):
@@ -28,6 +54,7 @@ class CompleteUploadRequest(BaseModel):
     session_id: str
     sha256_hash: Optional[str] = None
     file_size_bytes: Optional[int] = None
+    batch_id: Optional[str] = None
 
 
 class DocumentResponse(BaseModel):
@@ -36,6 +63,7 @@ class DocumentResponse(BaseModel):
     id: str
     user_id: str
     session_id: str
+    batch_id: Optional[str] = None
     filename: str
     file_size_bytes: int
     mime_type: str
@@ -45,8 +73,10 @@ class DocumentResponse(BaseModel):
     key_fingerprint: str
     copies_authorized: int
     copies_consumed: int
+    retention_hours: int = 2
     expires_at: datetime
     cleanup_state: str
     download_url: Optional[str] = None
     download_expires_in: Optional[int] = None
     created_at: datetime
+

@@ -376,3 +376,114 @@ async def test_direct_completed_state_change_prevention(client: TestClient, test
 
     # The authoritative state machine must ignore client input and enforce CREATED
     assert job["status"] == "CREATED"
+
+
+@pytest.mark.asyncio
+async def test_batch_upload_and_batch_job_creation(client: TestClient, test_setup):
+    user = test_setup["user"]
+    shop_a = test_setup["shop_a"]
+    session_a = test_setup["session_a"]
+    op_b = test_setup["op_b"]
+
+    # 1. Batch Init Upload for 2 documents
+    batch_init_res = client.post(
+        "/api/v1/documents/batch-init-upload",
+        json={
+            "session_id": session_a["id"],
+            "retention_hours": 3,
+            "files": [
+                {
+                    "filename": "thesis_ch1.pdf",
+                    "file_size_bytes": 1024,
+                    "mime_type": "application/pdf",
+                    "sha256_hash": "c" * 64,
+                    "iv_hex": "11" * 12,
+                    "key_fingerprint": "FP-BATCH-001",
+                    "copies_authorized": 2
+                },
+                {
+                    "filename": "thesis_ch2.pdf",
+                    "file_size_bytes": 2048,
+                    "mime_type": "application/pdf",
+                    "sha256_hash": "d" * 64,
+                    "iv_hex": "22" * 12,
+                    "key_fingerprint": "FP-BATCH-002",
+                    "copies_authorized": 2
+                }
+            ]
+        },
+        headers={"Authorization": f"Bearer {user['access_token']}"}
+    )
+    assert batch_init_res.status_code == 201
+    batch_init = batch_init_res.json()
+    batch_id = batch_init["batch_id"]
+    uploads = batch_init["uploads"]
+    assert len(uploads) == 2
+
+    # 2. Complete both uploads
+    doc_ids = []
+    for upl in uploads:
+        comp_res = client.post(
+            f"/api/v1/documents/{upl['upload_id']}/complete-upload",
+            json={
+                "document_id": upl["document_id"],
+                "session_id": session_a["id"],
+                "batch_id": batch_id
+            },
+            headers={"Authorization": f"Bearer {user['access_token']}"}
+        )
+        assert comp_res.status_code == 200
+        doc_ids.append(upl["document_id"])
+
+    # 3. Create batch print jobs
+    batch_job_res = client.post(
+        "/api/v1/jobs/batch",
+        json={
+            "shop_id": shop_a["id"],
+            "session_id": session_a["id"],
+            "batch_id": batch_id,
+            "retention_hours": 3,
+            "items": [
+                {
+                    "document_id": doc_ids[0],
+                    "page_count": 4,
+                    "requested_copies": 1,
+                    "color_mode": "MONOCHROME"
+                },
+                {
+                    "document_id": doc_ids[1],
+                    "page_count": 6,
+                    "requested_copies": 1,
+                    "color_mode": "COLOR"
+                }
+            ]
+        },
+        headers={"Authorization": f"Bearer {user['access_token']}"}
+    )
+    assert batch_job_res.status_code == 201
+    batch_data = batch_job_res.json()
+    assert batch_data["batch_id"] == batch_id
+    assert batch_data["total_files"] == 2
+    assert batch_data["total_pages"] == 10
+    assert len(batch_data["jobs"]) == 2
+    assert batch_data["jobs"][0]["file_index"] == 0
+    assert batch_data["jobs"][1]["file_index"] == 1
+    assert batch_data["jobs"][0]["total_files"] == 2
+    assert batch_data["jobs"][1]["total_files"] == 2
+    assert batch_data["jobs"][0]["retention_hours"] == 3
+
+    # 4. Fetch batch jobs via GET /batch/{batch_id}
+    fetch_batch = client.get(
+        f"/api/v1/jobs/batch/{batch_id}",
+        headers={"Authorization": f"Bearer {user['access_token']}"}
+    )
+    assert fetch_batch.status_code == 200
+    assert fetch_batch.json()["total_pages"] == 10
+
+    # 5. Isolation: Shop B cannot access Shop A's batch
+    bad_batch = client.get(
+        f"/api/v1/jobs/batch/{batch_id}",
+        headers={"Authorization": f"Bearer {op_b['access_token']}"}
+    )
+    assert bad_batch.status_code == 403
+

@@ -92,7 +92,33 @@ class PrintJobRepository(BaseRepository[PrintJob]):
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
+    async def list_by_batch_id(self, batch_id: str) -> List[PrintJob]:
+        """
+        Retrieves all jobs belonging to a multi-file batch, ordered by file_index.
+        """
+        query = select(PrintJob).where(PrintJob.batch_id == batch_id).order_by(PrintJob.file_index.asc())
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def update_page_progress_atomic(self, job_id: str, pages_printed: int) -> PrintJob:
+        """
+        Updates page-level print progress atomically.
+        """
+        job = await self.get_by_id(job_id)
+        if not job:
+            raise PrivPrintException(
+                status_code=404,
+                code=ErrorCode.NOT_FOUND,
+                message=f"Print job {job_id} not found"
+            )
+        job.pages_printed = max(0, pages_printed)
+        if job.status == PrintJobStatus.AUTHORIZED.value and pages_printed > 0:
+            job.status = PrintJobStatus.PRINTING.value
+        await self.session.flush()
+        return job
+
     async def increment_copies_atomic(self, job_id: str, delta: int = 1) -> PrintJob:
+
         """
         ATOMIC COPY-COUNT ENFORCEMENT:
         Executes a single conditional atomic SQL UPDATE statement:

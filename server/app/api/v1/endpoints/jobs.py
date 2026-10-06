@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, Depends, Header, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,7 +16,9 @@ from app.schemas.print_job import (
     JobCreateRequest,
     JobAuthorizeRequest,
     JobCancelRequest,
-    JobResponse
+    JobResponse,
+    BatchJobCreateRequest,
+    BatchJobResponse,
 )
 from app.api.deps import get_current_user, AuthPrincipal
 from app.api.deps_rate_limit import RateLimiter
@@ -122,9 +124,14 @@ async def create_job(
         session_id=session.id,
         document_id=doc.id,
         printer_id=payload.printer_id,
+        batch_id=payload.batch_id,
+        file_index=payload.file_index,
+        total_files=payload.total_files,
         page_count=payload.page_count,
+        pages_printed=0,
         requested_copies=payload.requested_copies,
         completed_copies=0,
+        retention_hours=payload.retention_hours,
         status=PrintJobStatus.CREATED.value,
         idempotency_key=idem_key,
         color_mode=payload.color_mode,
@@ -141,6 +148,9 @@ async def create_job(
         "job_id": job.id,
         "shop_id": job.shop_id,
         "user_id": job.user_id,
+        "batch_id": job.batch_id,
+        "file_index": job.file_index,
+        "total_files": job.total_files,
         "status": job.status,
         "requested_copies": job.requested_copies
     }
@@ -151,6 +161,178 @@ async def create_job(
         await redis_service.publish_device_event(job.printer_id, "JOB_CREATED", event_payload)
 
     return JobResponse.model_validate(job)
+
+
+@router.post(
+    "/batch",
+    response_model=BatchJobResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(RateLimiter("job_create", settings.RATE_LIMIT_JOB_CREATE_MAX, settings.RATE_LIMIT_JOB_CREATE_WINDOW_SECONDS))]
+)
+async def create_batch_jobs(
+    payload: BatchJobCreateRequest,
+    db: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_user)
+) -> BatchJobResponse:
+    job_repo = PrintJobRepository(db)
+    session_repo = SessionRepository(db)
+    doc_repo = DocumentRepository(db)
+    shop_repo = ShopRepository(db)
+
+    # 1. Validate Session
+    session = await session_repo.get_by_id(payload.session_id)
+    if not session:
+        raise PrivPrintException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code=ErrorCode.NOT_FOUND,
+            message=f"Session {payload.session_id} not found"
+        )
+    if session.user_id and session.user_id != principal.user_id:
+        raise PrivPrintException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code=ErrorCode.FORBIDDEN,
+            message="Session ownership mismatch"
+        )
+
+    now_utc = datetime.now(timezone.utc)
+    sess_exp = session.expires_at if session.expires_at.tzinfo else session.expires_at.replace(tzinfo=timezone.utc)
+    if sess_exp < now_utc:
+        raise PrivPrintException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code=ErrorCode.JOB_EXPIRED,
+            message="Session has expired"
+        )
+
+    # 2. Validate Shop
+    if payload.shop_id != session.shop_id:
+        raise PrivPrintException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code=ErrorCode.VALIDATION_ERROR,
+            message=f"Shop mismatch: session is bound to shop {session.shop_id}, not {payload.shop_id}"
+        )
+    shop = await shop_repo.get_by_id(payload.shop_id)
+    if not shop or shop.status != "ACTIVE":
+        raise PrivPrintException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code=ErrorCode.VALIDATION_ERROR,
+            message="Target shop is not active or verified"
+        )
+
+    # 3. Create all batch jobs
+    batch_id = payload.batch_id or f"BAT-{uuid.uuid4().hex[:8].upper()}"
+    total_files = len(payload.items)
+    created_jobs: List[PrintJob] = []
+    redis_service = get_redis_service()
+
+    for idx, item in enumerate(payload.items):
+        doc = await doc_repo.get_by_id(item.document_id)
+        if not doc:
+            raise PrivPrintException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                code=ErrorCode.NOT_FOUND,
+                message=f"Document {item.document_id} not found"
+            )
+        if doc.user_id != principal.user_id:
+            raise PrivPrintException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                code=ErrorCode.FORBIDDEN,
+                message="Document ownership mismatch"
+            )
+        if item.requested_copies > doc.copies_authorized:
+            raise PrivPrintException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code=ErrorCode.COPY_LIMIT_REACHED,
+                message=f"Requested copies ({item.requested_copies}) exceeds authorized copies ({doc.copies_authorized})"
+            )
+
+        job_id = f"PRV-{uuid.uuid4().hex[:8].upper()}"
+        job = await job_repo.create(
+            id=job_id,
+            user_id=principal.user_id,
+            shop_id=payload.shop_id,
+            session_id=session.id,
+            document_id=doc.id,
+            printer_id=payload.printer_id,
+            batch_id=batch_id,
+            file_index=idx,
+            total_files=total_files,
+            page_count=item.page_count,
+            pages_printed=0,
+            requested_copies=item.requested_copies,
+            completed_copies=0,
+            retention_hours=payload.retention_hours,
+            status=PrintJobStatus.CREATED.value,
+            idempotency_key=item.idempotency_key,
+            color_mode=item.color_mode,
+            paper_size=item.paper_size,
+            orientation=item.orientation,
+            duplex_mode=item.duplex_mode,
+            expires_at=session.expires_at
+        )
+        created_jobs.append(job)
+
+        event_payload = {
+            "job_id": job.id,
+            "batch_id": batch_id,
+            "shop_id": job.shop_id,
+            "user_id": job.user_id,
+            "file_index": idx,
+            "total_files": total_files,
+            "status": job.status,
+            "requested_copies": job.requested_copies
+        }
+        await redis_service.publish_job_event(job.id, "JOB_CREATED", event_payload)
+        await redis_service.publish_user_event(job.user_id, "JOB_CREATED", event_payload)
+        await redis_service.publish_shop_event(job.shop_id, "JOB_CREATED", event_payload)
+
+    await db.commit()
+
+    return BatchJobResponse(
+        batch_id=batch_id,
+        total_files=total_files,
+        total_pages=sum(j.page_count for j in created_jobs),
+        jobs=[JobResponse.model_validate(j) for j in created_jobs]
+    )
+
+
+@router.get("/batch/{batch_id}", response_model=BatchJobResponse)
+async def get_batch_jobs(
+    batch_id: str,
+    db: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_user)
+) -> BatchJobResponse:
+    job_repo = PrintJobRepository(db)
+    jobs = await job_repo.list_by_batch_id(batch_id)
+    if not jobs:
+        raise PrivPrintException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code=ErrorCode.NOT_FOUND,
+            message=f"Batch {batch_id} not found"
+        )
+
+    # Tenant isolation validation on first job
+    sample_job = jobs[0]
+    if principal.role == UserRole.USER:
+        if sample_job.user_id != principal.user_id:
+            raise PrivPrintException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                code=ErrorCode.FORBIDDEN,
+                message="Access denied: you do not own this batch"
+            )
+    elif principal.role in [UserRole.SHOP_OPERATOR, UserRole.PRINT_DEVICE]:
+        if principal.shop_id and sample_job.shop_id != principal.shop_id:
+            raise PrivPrintException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                code=ErrorCode.FORBIDDEN,
+                message="Access denied: batch belongs to another shop"
+            )
+
+    return BatchJobResponse(
+        batch_id=batch_id,
+        total_files=len(jobs),
+        total_pages=sum(j.page_count for j in jobs),
+        jobs=[JobResponse.model_validate(j) for j in jobs]
+    )
 
 
 @router.get("/{job_id}", response_model=JobResponse)

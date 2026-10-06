@@ -59,6 +59,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Clear
 import com.example.privprint.data.model.SelectedDocument
 import com.example.privprint.ui.components.CornerRadiusButton
 import com.example.privprint.ui.components.PrivPrintCard
@@ -71,19 +74,32 @@ import com.example.privprint.ui.components.PrivPrintSectionHeader
 fun DocumentPickerScreen(
     onDocumentSelected: (SelectedDocument) -> Unit,
     onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onDocumentsSelected: ((List<SelectedDocument>) -> Unit)? = null
 ) {
     val context = LocalContext.current
-    var currentDoc by remember { mutableStateOf<SelectedDocument?>(null) }
+    var selectedDocs by remember { mutableStateOf<List<SelectedDocument>>(emptyList()) }
+    var validationError by remember { mutableStateOf<String?>(null) }
 
-    // System Document Picker
+    // Multi-File Document Picker
     val docPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        if (uri != null) {
-            val doc = parseDocumentFromUri(context, uri)
-            currentDoc = doc
-            onDocumentSelected(doc)
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris: List<Uri>? ->
+        if (!uris.isNullOrEmpty()) {
+            val parsedDocs = uris.map { parseDocumentFromUri(context, it) }
+            val combined = (selectedDocs + parsedDocs).distinctBy { it.name }
+            if (combined.size > 10) {
+                validationError = "Maximum 10 files allowed in a single print batch."
+                selectedDocs = combined.take(10)
+            } else {
+                val totalBytes = combined.sumOf { it.sizeBytes }
+                if (totalBytes > 50 * 1024 * 1024) {
+                    validationError = "Total batch size exceeds 50 MB limit."
+                } else {
+                    validationError = null
+                }
+                selectedDocs = combined
+            }
         }
     }
 
@@ -119,7 +135,7 @@ fun DocumentPickerScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "Select Document",
+                        text = if (selectedDocs.size > 1) "Selected Batch (${selectedDocs.size} files)" else "Select Documents",
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                     )
                 },
@@ -129,6 +145,19 @@ fun DocumentPickerScreen(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back"
                         )
+                    }
+                },
+                actions = {
+                    if (selectedDocs.isNotEmpty()) {
+                        IconButton(onClick = {
+                            selectedDocs = emptyList()
+                            validationError = null
+                        }) {
+                            Icon(
+                                imageVector = Icons.Default.Clear,
+                                contentDescription = "Clear All"
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -146,8 +175,30 @@ fun DocumentPickerScreen(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Selected Document Card (if one is chosen)
-            if (currentDoc != null) {
+            if (validationError != null) {
+                PrivPrintCard(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = validationError!!,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+            }
+
+            // Selected Batch Cards (if documents are chosen)
+            if (selectedDocs.isNotEmpty()) {
+                val totalBytes = selectedDocs.sumOf { it.sizeBytes }
+                val totalPages = selectedDocs.sumOf { it.pageCount }
+                val formattedTotalSize = when {
+                    totalBytes < 1024 -> "$totalBytes B"
+                    totalBytes < 1024 * 1024 -> "${totalBytes / 1024} KB"
+                    else -> "%.1f MB".format(totalBytes.toDouble() / (1024 * 1024))
+                }
+
                 PrivPrintCard(
                     containerColor = MaterialTheme.colorScheme.surface,
                     elevation = 1.dp,
@@ -158,50 +209,80 @@ fun DocumentPickerScreen(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(MaterialTheme.colorScheme.primaryContainer),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = if (currentDoc!!.mimeType.contains("pdf")) Icons.Default.PictureAsPdf else Icons.Default.Description,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = currentDoc!!.name,
+                                    text = "Ready to Print (${selectedDocs.size} file${if (selectedDocs.size > 1) "s" else ""})",
                                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "${currentDoc!!.formattedSize} • ${currentDoc!!.pageCount} pages",
+                                    text = "$formattedTotalSize total • $totalPages total pages",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                             Icon(
                                 imageVector = Icons.Default.CheckCircle,
-                                contentDescription = "Selected",
+                                contentDescription = "Ready",
                                 tint = Color(0xFF059669),
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(24.dp)
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(14.dp))
 
-                        // Selected document info table
-                        DocumentInfoRow(label = "File Name", value = currentDoc!!.name)
-                        DocumentInfoRow(label = "File Type", value = currentDoc!!.mimeType)
-                        DocumentInfoRow(label = "File Size", value = currentDoc!!.formattedSize)
-                        DocumentInfoRow(label = "Page Count", value = "${currentDoc!!.pageCount} pages")
+                        // Individual Document Items in Batch
+                        selectedDocs.forEachIndexed { index, doc ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(MaterialTheme.colorScheme.primaryContainer),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = if (doc.mimeType.contains("pdf")) Icons.Default.PictureAsPdf else Icons.Default.Description,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "${index + 1}. ${doc.name}",
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "${doc.formattedSize} • ${doc.pageCount} page${if (doc.pageCount > 1) "s" else ""}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                IconButton(
+                                    onClick = {
+                                        selectedDocs = selectedDocs.filterNot { it == doc }
+                                    },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = "Remove file",
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
 
                         Spacer(modifier = Modifier.height(16.dp))
 
@@ -210,8 +291,8 @@ fun DocumentPickerScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             PrivPrintOutlinedButton(
-                                text = "Change file",
-                                icon = Icons.Default.Refresh,
+                                text = "Add More",
+                                icon = Icons.Default.Add,
                                 onClick = { docPickerLauncher.launch("*/*") },
                                 modifier = Modifier.weight(1f)
                             )
@@ -219,7 +300,11 @@ fun DocumentPickerScreen(
                             PrivPrintPrimaryButton(
                                 text = "Continue",
                                 icon = Icons.AutoMirrored.Filled.ArrowForward,
-                                onClick = { onDocumentSelected(currentDoc!!) },
+                                onClick = {
+                                    if (selectedDocs.isNotEmpty()) {
+                                        onDocumentsSelected?.invoke(selectedDocs) ?: onDocumentSelected(selectedDocs.first())
+                                    }
+                                },
                                 modifier = Modifier.weight(1f),
                                 testTag = "proceed_to_confirmation_button"
                             )
@@ -227,7 +312,7 @@ fun DocumentPickerScreen(
                     }
                 }
             } else {
-                // Primary File Picker Card
+                // Primary Multi-File Picker Card
                 PrivPrintCard(
                     onClick = { docPickerLauncher.launch("*/*") },
                     elevation = 1.dp,
@@ -248,27 +333,27 @@ fun DocumentPickerScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.FileOpen,
-                                contentDescription = "Open Document",
+                                contentDescription = "Open Documents",
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(28.dp)
                             )
                         }
                         Spacer(modifier = Modifier.height(14.dp))
                         Text(
-                            text = "Choose Document to Print",
+                            text = "Choose Document(s) to Print",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Supports PDF, DOCX, TXT, and Images",
+                            text = "Select one or multiple files (PDF, DOCX, Images)",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(modifier = Modifier.height(18.dp))
 
                         PrivPrintPrimaryButton(
-                            text = "Browse Files",
+                            text = "Browse Files (Multi-Select)",
                             icon = Icons.Default.AttachFile,
                             onClick = { docPickerLauncher.launch("*/*") },
                             modifier = Modifier.fillMaxWidth(),
@@ -278,14 +363,21 @@ fun DocumentPickerScreen(
                 }
             }
 
+
             // Quick Sample Documents for test execution
             PrivPrintSectionHeader(title = "Or select a test document:")
 
             sampleDocuments.forEach { doc ->
+                val isSelected = selectedDocs.contains(doc)
                 PrivPrintCard(
                     onClick = {
-                        currentDoc = doc
-                        onDocumentSelected(doc)
+                        if (isSelected) {
+                            selectedDocs = selectedDocs.filterNot { it == doc }
+                        } else {
+                            if (selectedDocs.size < 10) {
+                                selectedDocs = selectedDocs + doc
+                            }
+                        }
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -326,13 +418,23 @@ fun DocumentPickerScreen(
                         }
                         OutlinedButton(
                             onClick = {
-                                currentDoc = doc
-                                onDocumentSelected(doc)
+                                if (isSelected) {
+                                    selectedDocs = selectedDocs.filterNot { it == doc }
+                                } else {
+                                    if (selectedDocs.size < 10) {
+                                        selectedDocs = selectedDocs + doc
+                                    }
+                                }
                             },
                             shape = RoundedCornerShape(8.dp),
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                         ) {
-                            Text("Select", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                text = if (isSelected) "Remove" else "Add",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isSelected) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                            )
                         }
                     }
                 }

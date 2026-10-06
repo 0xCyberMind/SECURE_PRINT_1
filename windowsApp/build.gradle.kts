@@ -14,13 +14,9 @@ dependencies {
   implementation("com.squareup.okhttp3:okhttp:4.12.0")
   implementation("com.google.code.gson:gson:2.13.2")
   implementation("com.google.zxing:core:3.5.3")
-}
-
-val stationAgent = rootProject.file("windows_agent/dist/PrivPrintStationWorker.exe")
-
-tasks.processResources {
-  inputs.file(stationAgent)
-  from(stationAgent)
+  implementation("net.java.dev.jna:jna:5.17.0")
+  implementation("net.java.dev.jna:jna-platform:5.17.0")
+  implementation("org.apache.pdfbox:pdfbox:3.0.5")
 }
 
 compose.desktop {
@@ -29,7 +25,7 @@ compose.desktop {
 
     nativeDistributions {
       packageName = "PrivPrint Shop Station"
-      packageVersion = "1.0.1"
+      packageVersion = "1.0.5"
       description = "PrivPrint secure Windows shop station"
       vendor = "PrivPrint"
       targetFormats(org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe, org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi)

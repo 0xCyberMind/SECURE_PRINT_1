@@ -135,3 +135,118 @@ async def test_full_database_schema_and_relationships(db_session):
     )
     assert audit.event_type == "JOB_CREATED"
     assert audit.job_id == job.id
+
+
+@pytest.mark.asyncio
+async def test_batch_schema_and_progress_tracking(db_session):
+    user_repo = UserRepository(db_session)
+    shop_repo = ShopRepository(db_session)
+    session_repo = SessionRepository(db_session)
+    doc_repo = DocumentRepository(db_session)
+    job_repo = PrintJobRepository(db_session)
+
+    now = datetime.now(timezone.utc)
+    user = await user_repo.create(
+        id="usr_batch_001",
+        email="batchuser@example.com",
+        hashed_password="bcrypt_secret",
+        role=UserRole.USER.value
+    )
+    shop = await shop_repo.create(
+        id="SHOP-BATCH-01",
+        name="Batch Print Station",
+        owner_id=user.id,
+        address="Batch Blvd 10",
+        permanent_qr_payload="privprint://shop?id=SHOP-BATCH-01"
+    )
+    session = await session_repo.create(
+        id="SES-BATCH-01",
+        user_id=user.id,
+        shop_id=shop.id,
+        token="tok_batch_test",
+        retention_hours=4,
+        expires_at=now + timedelta(hours=4)
+    )
+    assert session.retention_hours == 4
+
+    # Create 3 documents in a batch
+    batch_id = "BAT-TEST-001"
+    doc1 = await doc_repo.create(
+        id="DOC-B1",
+        user_id=user.id,
+        session_id=session.id,
+        batch_id=batch_id,
+        filename="file1.pdf",
+        storage_path="path/1.enc",
+        file_size_bytes=5000,
+        sha256_hash="a" * 64,
+        iv_hex="01" * 12,
+        key_fingerprint="FP1",
+        retention_hours=4,
+        expires_at=now + timedelta(hours=4)
+    )
+    doc2 = await doc_repo.create(
+        id="DOC-B2",
+        user_id=user.id,
+        session_id=session.id,
+        batch_id=batch_id,
+        filename="file2.pdf",
+        storage_path="path/2.enc",
+        file_size_bytes=8000,
+        sha256_hash="b" * 64,
+        iv_hex="02" * 12,
+        key_fingerprint="FP2",
+        retention_hours=4,
+        expires_at=now + timedelta(hours=4)
+    )
+
+    assert doc1.batch_id == batch_id
+    assert doc1.retention_hours == 4
+    assert doc2.batch_id == batch_id
+
+    # Create 2 jobs in the batch
+    job1 = await job_repo.create(
+        id="PRV-B1",
+        user_id=user.id,
+        shop_id=shop.id,
+        session_id=session.id,
+        document_id=doc1.id,
+        batch_id=batch_id,
+        file_index=0,
+        total_files=2,
+        page_count=5,
+        pages_printed=0,
+        requested_copies=1,
+        retention_hours=4,
+        status=PrintJobStatus.AUTHORIZED.value,
+        expires_at=now + timedelta(hours=4)
+    )
+    job2 = await job_repo.create(
+        id="PRV-B2",
+        user_id=user.id,
+        shop_id=shop.id,
+        session_id=session.id,
+        document_id=doc2.id,
+        batch_id=batch_id,
+        file_index=1,
+        total_files=2,
+        page_count=3,
+        pages_printed=0,
+        requested_copies=1,
+        retention_hours=4,
+        status=PrintJobStatus.AUTHORIZED.value,
+        expires_at=now + timedelta(hours=4)
+    )
+
+    batch_jobs = await job_repo.list_by_batch_id(batch_id)
+    assert len(batch_jobs) == 2
+    assert batch_jobs[0].id == "PRV-B1"
+    assert batch_jobs[1].id == "PRV-B2"
+    assert batch_jobs[0].file_index == 0
+    assert batch_jobs[1].file_index == 1
+
+    # Test atomic page progress update
+    updated_job = await job_repo.update_page_progress_atomic("PRV-B1", pages_printed=3)
+    assert updated_job.pages_printed == 3
+    assert updated_job.status == PrintJobStatus.PRINTING.value
+

@@ -76,13 +76,15 @@ fun PrintSettingsScreen(
     onUpdateDuplex: (DuplexMode) -> Unit,
     onProceed: () -> Unit,
     onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    documents: List<SelectedDocument> = listOf(document)
 ) {
     var orientation by remember { mutableStateOf("Portrait") }
     var pageRangeOption by remember { mutableStateOf("All Pages") }
 
+    val totalPages = documents.sumOf { it.pageCount }
     val pricePerPage = if (settings.colorMode == ColorMode.COLOR) 0.25 else 0.10
-    val totalCost = document.pageCount * settings.copies * pricePerPage
+    val totalCost = totalPages * settings.copies * pricePerPage
 
     Scaffold(
         topBar = {
@@ -141,14 +143,20 @@ fun PrintSettingsScreen(
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = document.name,
+                            text = if (documents.size > 1) "${documents.size} Documents Selected" else document.name,
                             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                             color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
+                        val totalBytes = documents.sumOf { it.sizeBytes }
+                        val formattedTotalSize = when {
+                            totalBytes < 1024 -> "$totalBytes B"
+                            totalBytes < 1024 * 1024 -> "${totalBytes / 1024} KB"
+                            else -> "%.1f MB".format(totalBytes.toDouble() / (1024 * 1024))
+                        }
                         Text(
-                            text = "${document.formattedSize} • ${document.pageCount} pages",
+                            text = if (documents.size > 1) "$formattedTotalSize • $totalPages pages across batch" else "${document.formattedSize} • ${document.pageCount} pages",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

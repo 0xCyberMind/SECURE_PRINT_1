@@ -12,12 +12,10 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from windows_agent.config import AgentConfig
 from windows_agent.secure_store import SecureCredentialStore
-from windows_agent.printer_spooler import PrinterSpoolerManager
+from windows_agent.printer_spooler import PrinterSpoolerManager, PrinterUnavailableError
 from windows_agent.agent_service import WindowsAgentService
 from windows_agent.api_client import WindowsAgentApiClient
 from windows_agent.realtime_client import WindowsAgentRealtimeClient, ConnectionState
-from windows_agent.dashboard import dashboard_app, init_dashboard
-from fastapi.testclient import TestClient
 
 @pytest.fixture
 def agent_config(tmp_path):
@@ -165,6 +163,87 @@ def test_printer_ids_are_shop_scoped_and_legacy_ids_still_resolve():
     assert first_shop_spooler.get_printer_by_id(legacy_id)["id"] == first_id
 
 
+def test_missing_job_printer_uses_installed_windows_default():
+    spooler = PrinterSpoolerManager(identity_namespace="SHOP-101")
+    printers = [{
+        "id": "PRN-WIN-001",
+        "name": "Shop Xerox",
+        "status": "READY",
+        "is_online": True,
+        "is_default": True,
+    }]
+    spooler._is_windows = lambda: True
+    spooler.discover_local_printers = lambda: printers
+
+    assert spooler.resolve_printer_id(None) == "PRN-WIN-001"
+    assert spooler.resolve_printer_id("PRN-HP-01") == "PRN-WIN-001"
+
+
+def test_missing_job_printer_does_not_route_to_windows_document_writer():
+    spooler = PrinterSpoolerManager()
+    spooler._is_windows = lambda: True
+    spooler.discover_local_printers = lambda: [{
+        "id": "PRN-WIN-PDF",
+        "name": "Microsoft Print to PDF",
+        "driver_name": "Microsoft Print To PDF",
+        "status": "READY",
+        "is_online": True,
+        "is_default": True,
+    }]
+
+    with pytest.raises(PrinterUnavailableError, match="No usable Windows printer"):
+        spooler.resolve_printer_id(None)
+
+
+@pytest.mark.asyncio
+async def test_duplicate_authorization_for_completed_job_is_ignored(agent_config):
+    service = WindowsAgentService(agent_config)
+    service.api_client.get_print_queue = AsyncMock(return_value=[{
+        "id": "PRV-ALREADY-DONE",
+        "status": "COMPLETED",
+    }])
+    service.api_client.get_print_content = AsyncMock()
+    service.api_client.fail_job = AsyncMock()
+
+    await service.process_print_job("PRV-ALREADY-DONE")
+
+    service.api_client.get_print_content.assert_not_awaited()
+    service.api_client.fail_job.assert_not_awaited()
+    assert service.audit_log[-1]["eventType"] == "JOB_IGNORED"
+
+
+@pytest.mark.asyncio
+async def test_authorized_job_without_a_usable_windows_printer_fails_clearly(agent_config):
+    service = WindowsAgentService(agent_config)
+    service.config.device_id = "dev_win_test_123"
+    service.spooler._is_windows = lambda: True
+    service.spooler.discover_local_printers = lambda: [{
+        "id": "PRN-WIN-PDF",
+        "name": "Microsoft Print to PDF",
+        "driver_name": "Microsoft Print To PDF",
+        "status": "READY",
+        "is_online": True,
+        "is_default": True,
+    }]
+    service.api_client.get_print_queue = AsyncMock(return_value=[{
+        "id": "PRV-NO-PRINTER",
+        "shop_id": agent_config.shop_id,
+        "status": "AUTHORIZED",
+        "document_id": "DOC-TEST-102",
+        "printer_id": None,
+    }])
+    service.api_client.get_print_content = AsyncMock()
+    service.api_client.start_printing = AsyncMock(return_value={})
+    service.api_client.fail_job = AsyncMock(return_value={})
+
+    await service.process_print_job("PRV-NO-PRINTER")
+
+    service.api_client.get_print_content.assert_not_awaited()
+    service.api_client.start_printing.assert_awaited_once_with("PRV-NO-PRINTER")
+    service.api_client.fail_job.assert_awaited_once()
+    assert "No usable Windows printer is installed" in service.api_client.fail_job.await_args.args[1]
+
+
 def test_printer_status_mapping_exact_states():
     spooler = PrinterSpoolerManager()
     
@@ -199,6 +278,7 @@ async def test_job_spooling_workflow(agent_config):
     service = WindowsAgentService(agent_config)
     await service.initialize()
     service.config.device_id = "dev_win_test_123"
+    service.spooler._is_windows = lambda: False
 
     job_id = "PRV-TEST-JOB-101"
     plaintext = b"%PDF-1.4\nPrivPrint encrypted print test\n%%EOF"
@@ -298,75 +378,6 @@ def test_spooler_invalid_empty_document_handling():
     assert "empty" in str(exc_info.value) or "invalid" in str(exc_info.value).lower()
 
 
-def test_dashboard_api_status(agent_config):
-    service = WindowsAgentService(agent_config)
-    init_dashboard(service)
-
-    client = TestClient(dashboard_app)
-    response = client.get("/api/status")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["shop_id"] == "SHOP-101"
-    assert "printers" in data
-    assert "audit_log" in data
-    assert data["authenticated"] is False
-    assert data["server_base_url"] == agent_config.server_base_url
-
-
-def test_dashboard_queue_api_returns_cloud_jobs(agent_config):
-    service = WindowsAgentService(agent_config)
-    service.config.access_token = "station-token"
-    service.api_client.get_print_queue = AsyncMock(return_value=[{"id": "PRV-123", "status": "AUTHORIZED"}])
-    init_dashboard(service)
-
-    response = TestClient(dashboard_app).get("/api/queue")
-
-    assert response.status_code == 200
-    assert response.json() == [{"id": "PRV-123", "status": "AUTHORIZED"}]
-    service.api_client.get_print_queue.assert_awaited_once_with(agent_config.shop_id)
-
-
-def test_dashboard_queue_api_reports_backend_failure(agent_config):
-    service = WindowsAgentService(agent_config)
-    service.config.access_token = "station-token"
-    service.api_client.get_print_queue = AsyncMock(side_effect=RuntimeError("backend unavailable"))
-    init_dashboard(service)
-
-    response = TestClient(dashboard_app).get("/api/queue")
-
-    assert response.status_code == 502
-    assert "backend unavailable" in response.json()["detail"]
-
-
-def test_dashboard_printer_refresh_syncs_to_cloud(agent_config):
-    service = WindowsAgentService(agent_config)
-    service.config.access_token = "station-token"
-    service.spooler.discover_local_printers = lambda: [{"id": "WIN-PRN-1", "name": "Xerox", "status": "ONLINE"}]
-    service.api_client.sync_printers = AsyncMock(return_value=[{"id": "WIN-PRN-1"}])
-    init_dashboard(service)
-
-    response = TestClient(dashboard_app).post("/api/printers/refresh")
-
-    assert response.status_code == 200
-    assert response.json()["synced_count"] == 1
-    service.api_client.sync_printers.assert_awaited_once_with(
-        agent_config.shop_id,
-        [{"id": "WIN-PRN-1", "name": "Xerox", "status": "ONLINE", "shop_id": agent_config.shop_id}],
-    )
-
-
-def test_dashboard_realtime_reconnect_route(agent_config):
-    service = WindowsAgentService(agent_config)
-    service.reconnect_realtime = AsyncMock()
-    init_dashboard(service)
-
-    response = TestClient(dashboard_app).post("/api/realtime/reconnect")
-
-    assert response.status_code == 200
-    assert response.json() == {"status": "reconnecting"}
-    service.reconnect_realtime.assert_awaited_once()
-
-
 @pytest.mark.asyncio
 async def test_service_realtime_reconnect_replaces_running_task(agent_config):
     service = WindowsAgentService(agent_config)
@@ -419,125 +430,6 @@ def test_api_client_surfaces_backend_error_message(agent_config):
 
     with pytest.raises(RuntimeError, match="Printer sync failed"):
         WindowsAgentApiClient._raise_for_response(response)
-
-
-def test_dashboard_email_password_setup_routes(agent_config):
-    service = WindowsAgentService(agent_config)
-    service.login_operator = AsyncMock(return_value=[
-        {"id": "shop-test", "name": "Test Xerox Shop"}
-    ])
-    service.register_operator = AsyncMock(return_value=[
-        {"id": "shop-new", "name": "New Xerox Shop"}
-    ])
-    service.connect_operator_shop = AsyncMock()
-    init_dashboard(service)
-
-    client = TestClient(dashboard_app)
-    logged_in = client.post(
-        "/api/auth/login",
-        json={"email": "operator@example.com", "password": "Password123!"},
-    )
-    assert logged_in.status_code == 200
-    assert logged_in.json()["shops"] == [{"id": "shop-test", "name": "Test Xerox Shop"}]
-    service.login_operator.assert_awaited_once_with(
-        "operator@example.com",
-        "Password123!",
-    )
-
-    registered = client.post(
-        "/api/auth/register",
-        json={
-            "email": "new-operator@example.com",
-            "password": "Password123!",
-            "full_name": "Shop Operator",
-            "shop_name": "New Xerox Shop",
-            "shop_address": "12 Main Market Road",
-        },
-    )
-    assert registered.status_code == 200
-    assert registered.json()["shops"] == [{"id": "shop-new", "name": "New Xerox Shop"}]
-    service.register_operator.assert_awaited_once_with(
-        "new-operator@example.com",
-        "Password123!",
-        "Shop Operator",
-        "New Xerox Shop",
-        "12 Main Market Road",
-    )
-
-    connected = client.post("/api/auth/connect", json={"shop_id": "shop-test"})
-    assert connected.status_code == 200
-    service.connect_operator_shop.assert_awaited_once_with("shop-test")
-
-
-def test_shop_details_route_requires_station_authentication(agent_config):
-    service = WindowsAgentService(agent_config)
-    service.config.access_token = "station-access-token"
-    service.config.shop_id = "SHOP-101"
-    service.api_client.get_shop_details = AsyncMock(return_value={
-        "id": "SHOP-101",
-        "name": "Test Xerox Shop",
-        "address": "12 Main Market Road",
-        "is_verified": True,
-        "permanent_qr_payload": "privprint://shop?id=SHOP-101",
-    })
-    init_dashboard(service)
-
-    response = TestClient(dashboard_app).get("/api/shop")
-
-    assert response.status_code == 200
-    assert response.json()["permanent_qr_payload"] == "privprint://shop?id=SHOP-101"
-    service.api_client.get_shop_details.assert_awaited_once_with("SHOP-101")
-
-    service.config.access_token = None
-    unauthorized = TestClient(dashboard_app).get("/api/shop")
-    assert unauthorized.status_code == 401
-    assert service.api_client.get_shop_details.await_count == 1
-
-
-def test_auto_print_setting_is_saved_and_audited(agent_config, monkeypatch):
-    service = WindowsAgentService(agent_config)
-    service.config.access_token = "station-access-token"
-    service.config.shop_id = "SHOP-101"
-    saved = []
-    monkeypatch.setattr(service.config, "save", lambda: saved.append(True))
-    init_dashboard(service)
-    client = TestClient(dashboard_app)
-
-    response = client.post("/api/settings/auto-print", json={"enabled": False})
-
-    assert response.status_code == 200
-    assert response.json() == {"auto_print_enabled": False}
-    assert service.config.auto_print_enabled is False
-    assert saved == [True]
-    assert service.audit_log[-1]["eventType"] == "AUTO_PRINT_UPDATED"
-    assert "paused" in service.audit_log[-1]["details"]
-
-    service.config.access_token = None
-    unauthorized = client.post("/api/settings/auto-print", json={"enabled": True})
-    assert unauthorized.status_code == 401
-    assert service.config.auto_print_enabled is False
-
-
-def test_auto_print_setting_rolls_back_when_config_cannot_be_saved(agent_config, monkeypatch):
-    service = WindowsAgentService(agent_config)
-    service.config.access_token = "station-access-token"
-    service.config.shop_id = "SHOP-101"
-
-    def fail_to_save():
-        raise OSError("profile is read-only")
-
-    monkeypatch.setattr(service.config, "save", fail_to_save)
-    init_dashboard(service)
-
-    response = TestClient(dashboard_app).post(
-        "/api/settings/auto-print",
-        json={"enabled": False},
-    )
-
-    assert response.status_code == 500
-    assert response.json()["detail"] == "Could not save the automatic printing setting: profile is read-only"
-    assert service.config.auto_print_enabled is True
-    assert service.audit_log[-1]["eventType"] == "AUTO_PRINT_UPDATE_ERROR"
 
 
 @pytest.mark.asyncio
