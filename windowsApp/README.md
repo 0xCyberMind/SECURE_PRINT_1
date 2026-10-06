@@ -2,6 +2,8 @@
 
 This is the native Compose Desktop shop/station application. It uses the Windows station worker for secure device registration, protected private-key storage, cloud queue handling, and printer spooler integration. The worker runs in the background; the visible interface is the installed desktop window, not a browser page.
 
+The desktop shop workspace follows the Android shop app's light slate-and-blue design and includes shop-operator sign-in/registration, the permanent customer QR, the cloud print queue, Windows printer synchronization, station key/connection status, and the station audit log. Authorized jobs are printed by the worker when automatic printing is enabled; the dashboard switch persists that setting in the station configuration.
+
 ## Build
 
 1. Build the station worker from the repository root. It creates `windows_agent\dist\PrivPrintStationWorker.exe`:

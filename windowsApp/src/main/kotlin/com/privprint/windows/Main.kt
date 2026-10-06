@@ -1,10 +1,12 @@
 package com.privprint.windows
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -22,16 +24,15 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,6 +42,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -49,23 +53,38 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private val Navy = Color(0xFF0B1220)
-private val Panel = Color(0xFF111C2E)
-private val RaisedPanel = Color(0xFF18263A)
-private val Cyan = Color(0xFF38BDF8)
-private val Muted = Color(0xFF9AAAC0)
-private val Green = Color(0xFF34D399)
+private val Ink = Color(0xFF0F172A)
+private val InkMuted = Color(0xFF475569)
+private val Muted = Color(0xFF64748B)
+private val CanvasWhite = Color(0xFFFFFFFF)
+private val Background = Color(0xFFF8FAFC)
+private val SurfaceVariant = Color(0xFFF1F5F9)
+private val Border = Color(0xFFE2E8F0)
+private val Blue = Color(0xFF2563EB)
+private val BlueTint = Color(0xFFEFF6FF)
+private val Green = Color(0xFF059669)
+private val GreenTint = Color(0xFFECFDF5)
+private val Amber = Color(0xFFD97706)
+private val AmberTint = Color(0xFFFFFBEB)
+private val Red = Color(0xFFDC2626)
+private val RedTint = Color(0xFFFEF2F2)
 
-private enum class StationPage(val title: String) {
-    OVERVIEW("Overview"),
-    QUEUE("Print queue"),
-    PRINTERS("Printers"),
-    SECURITY("Security & station"),
+private enum class StationPage(val title: String, val symbol: String) {
+    OVERVIEW("Dashboard", "⌂"),
+    SHOP_QR("Shop QR", "▦"),
+    QUEUE("Print queue", "▤"),
+    PRINTERS("Printers", "▣"),
+    AUDIT("Security audit", "◈"),
+    SECURITY("Windows station", "⊞"),
 }
 
 fun main() = application {
@@ -84,20 +103,27 @@ fun main() = application {
             bridge.close()
             exitApplication()
         },
-        title = "PrivPrint | Shop Station",
-        state = rememberWindowState(width = 1180.dp, height = 800.dp),
+        title = "PrivPrint | Xerox Shop",
+        state = rememberWindowState(width = 1280.dp, height = 820.dp),
     ) {
         MaterialTheme(
-            colorScheme = darkColorScheme(
-                primary = Cyan,
-                onPrimary = Navy,
-                background = Navy,
-                surface = Panel,
-                onSurface = Color(0xFFF4F8FF),
-                secondary = Green,
+            colorScheme = lightColorScheme(
+                primary = Blue,
+                onPrimary = CanvasWhite,
+                primaryContainer = BlueTint,
+                onPrimaryContainer = Color(0xFF1E40AF),
+                secondary = Ink,
+                background = Background,
+                onBackground = Ink,
+                surface = CanvasWhite,
+                onSurface = Ink,
+                surfaceVariant = SurfaceVariant,
+                onSurfaceVariant = InkMuted,
+                outline = Border,
+                error = Red,
             ),
         ) {
-            Surface(Modifier.fillMaxSize(), color = Navy) {
+            Surface(Modifier.fillMaxSize(), color = Background) {
                 when {
                     startupError != null -> StartupFailure(startupError!!)
                     !isReady -> LoadingScreen()
@@ -115,7 +141,7 @@ private fun LoadingScreen() {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        CircularProgressIndicator(color = Cyan)
+        CircularProgressIndicator(color = Blue)
         Spacer(Modifier.height(18.dp))
         Text("Starting secure Windows station…", color = Muted)
     }
@@ -128,9 +154,9 @@ private fun StartupFailure(message: String) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("PrivPrint could not start", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+        Text("PrivPrint could not start", color = Ink, fontSize = 26.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
-        Text(message, color = Color(0xFFFCA5A5))
+        Text(message, color = Red)
         Spacer(Modifier.height(10.dp))
         Text("Close and reopen the application. If it continues, send this error to support.", color = Muted)
     }
@@ -139,20 +165,28 @@ private fun StartupFailure(message: String) {
 @Composable
 private fun StationApplication(bridge: StationBridge) {
     var status by remember { mutableStateOf<StationStatus?>(null) }
+    var shop by remember { mutableStateOf<ShopDetails?>(null) }
     var shops by remember { mutableStateOf<List<ShopOption>>(emptyList()) }
     var selectedShop by remember { mutableStateOf<ShopOption?>(null) }
     var isRegistering by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var statusError by remember { mutableStateOf<String?>(null) }
     var selectedPage by remember { mutableStateOf(StationPage.OVERVIEW) }
     var queue by remember { mutableStateOf<List<PrintJobStatus>>(emptyList()) }
     var queueBusy by remember { mutableStateOf(false) }
     var queueError by remember { mutableStateOf<String?>(null) }
     var actionMessage by remember { mutableStateOf<String?>(null) }
+    var autoPrintBusy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     suspend fun refreshStatus() {
         status = withContext(Dispatchers.IO) { bridge.status() }
+        statusError = null
+    }
+
+    suspend fun refreshShop() {
+        shop = withContext(Dispatchers.IO) { bridge.shopDetails() }
     }
 
     suspend fun refreshQueue() {
@@ -169,80 +203,106 @@ private fun StationApplication(bridge: StationBridge) {
 
     LaunchedEffect(Unit) {
         runCatching { refreshStatus() }
-            .onFailure { error = it.message }
+            .onSuccess {
+                if (status?.authenticated == true) {
+                    runCatching { refreshShop() }
+                        .onFailure { statusError = it.message ?: "Could not load Xerox shop details." }
+                    refreshQueue()
+                }
+            }
+            .onFailure { statusError = it.message ?: "Could not refresh station status." }
         while (true) {
             delay(4_000)
             runCatching { refreshStatus() }
-                .onFailure { error = it.message }
+                .onFailure { statusError = it.message ?: "Could not refresh station status." }
         }
     }
 
-    Row(Modifier.fillMaxSize().background(Navy)) {
+    LaunchedEffect(selectedPage, status?.authenticated) {
+        if (selectedPage == StationPage.QUEUE && status?.authenticated == true) {
+            refreshQueue()
+        }
+    }
+
+    Row(Modifier.fillMaxSize().background(Background)) {
         Column(
-            Modifier.width(252.dp).fillMaxHeight().background(Color(0xFF080E18)).padding(22.dp),
+            Modifier.width(240.dp).fillMaxHeight().background(CanvasWhite).padding(20.dp),
         ) {
-            Text("PRIVPRINT", color = Cyan, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
-            Text("SECURE SHOP STATION", color = Muted, fontSize = 10.sp, letterSpacing = 1.5.sp)
-            Spacer(Modifier.height(38.dp))
-            Text("WORKSPACE", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(12.dp))
-            NavLabel("Overview", selectedPage == StationPage.OVERVIEW) {
-                selectedPage = StationPage.OVERVIEW
-                actionMessage = null
-            }
-            NavLabel("Print queue", selectedPage == StationPage.QUEUE) {
-                selectedPage = StationPage.QUEUE
-                if (status?.authenticated == true) scope.launch { refreshQueue() }
-            }
-            NavLabel("Printers", selectedPage == StationPage.PRINTERS) {
-                selectedPage = StationPage.PRINTERS
-                actionMessage = null
-            }
-            NavLabel("Security & station", selectedPage == StationPage.SECURITY) {
-                selectedPage = StationPage.SECURITY
-                actionMessage = null
+            Text("PRIVPRINT", color = Blue, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
+            Text("XEROX SHOP", color = Muted, fontSize = 10.sp, letterSpacing = 1.5.sp)
+            Spacer(Modifier.height(30.dp))
+            Text("SHOP WORKSPACE", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(10.dp))
+            StationPage.entries.forEach { page ->
+                NavLabel(page, selectedPage == page) {
+                    selectedPage = page
+                    actionMessage = null
+                }
             }
             Spacer(Modifier.weight(1f))
-            HorizontalDivider(color = RaisedPanel)
-            Spacer(Modifier.height(16.dp))
-            Text("Encrypted delivery", color = Color.White, fontWeight = FontWeight.SemiBold)
+            HorizontalDivider(color = Border)
+            Spacer(Modifier.height(15.dp))
+            Text("Secure printing", color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
             Spacer(Modifier.height(4.dp))
-            Text("Files remain encrypted until authorized by this station.", color = Muted, fontSize = 12.sp)
+            Text(
+                "Customer documents stay encrypted until an authorized shop station prints them.",
+                color = Muted,
+                fontSize = 11.sp,
+                lineHeight = 16.sp,
+            )
         }
 
         Column(Modifier.fillMaxSize()) {
             Row(
-                Modifier.fillMaxWidth().height(68.dp).background(Panel).padding(horizontal = 28.dp),
+                Modifier.fillMaxWidth().height(72.dp).background(CanvasWhite).padding(horizontal = 26.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text(selectedPage.title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    Text(status?.shopId?.takeIf(String::isNotBlank)?.let { "Shop ID  $it" } ?: "Set up your shop account", color = Muted, fontSize = 12.sp)
+                    Text(selectedPage.title, color = Ink, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        shop?.name ?: status?.shopId?.takeIf(String::isNotBlank)?.let { "Shop ID  $it" }
+                            ?: "Sign in to connect your Xerox shop",
+                        color = Muted,
+                        fontSize = 12.sp,
+                    )
                 }
                 TextButton(
+                    enabled = !queueBusy && !autoPrintBusy,
                     onClick = {
                         scope.launch {
+                            actionMessage = null
                             when (selectedPage) {
                                 StationPage.QUEUE -> refreshQueue()
-                                StationPage.PRINTERS -> {
-                                    actionMessage = null
-                                    runCatching {
-                                        val count = withContext(Dispatchers.IO) { bridge.refreshPrinters() }
-                                        refreshStatus()
-                                        actionMessage = "$count printer(s) synced with the shop backend."
-                                    }.onFailure {
-                                        actionMessage = it.message ?: "Printer sync failed."
-                                    }
+                                StationPage.PRINTERS -> runCatching {
+                                    val count = withContext(Dispatchers.IO) { bridge.refreshPrinters() }
+                                    refreshStatus()
+                                    actionMessage = "$count Windows printer(s) synced with the shop."
+                                }.onFailure {
+                                    actionMessage = it.message ?: "Printer sync failed."
+                                }
+                                StationPage.SHOP_QR -> runCatching {
+                                    refreshShop()
+                                    actionMessage = "Permanent shop QR refreshed."
+                                }.onFailure {
+                                    actionMessage = it.message ?: "Could not refresh shop QR."
                                 }
                                 else -> runCatching { refreshStatus() }
-                                    .onFailure { error = it.message }
+                                    .onFailure { statusError = it.message ?: "Could not refresh station status." }
                             }
                         }
                     },
-                    enabled = !queueBusy,
                 ) {
-                    Text(if (selectedPage == StationPage.PRINTERS) "Sync printers" else "Refresh", color = Cyan)
+                    Text(
+                        when (selectedPage) {
+                            StationPage.QUEUE -> "Refresh queue"
+                            StationPage.PRINTERS -> "Sync printers"
+                            StationPage.SHOP_QR -> "Refresh QR"
+                            else -> "Refresh"
+                        },
+                        color = Blue,
+                    )
                 }
+                Spacer(Modifier.width(8.dp))
                 StatusPill(
                     if (status?.realtimeConnected == true) "CLOUD CONNECTED" else "CLOUD RECONNECTING",
                     status?.realtimeConnected == true,
@@ -250,104 +310,160 @@ private fun StationApplication(bridge: StationBridge) {
             }
 
             Row(
-                Modifier.fillMaxSize().padding(28.dp),
-                horizontalArrangement = Arrangement.spacedBy(22.dp),
+                Modifier.fillMaxSize().padding(24.dp),
+                horizontalArrangement = Arrangement.spacedBy(20.dp),
             ) {
                 Column(
                     Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     if (status?.authenticated != true) {
-                        if (selectedPage == StationPage.OVERVIEW) {
-                            Text("Welcome to PrivPrint", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Bold)
-                            Text("Sign in with your Xerox shop operator account, or register a shop. This station registers its encryption key when connected.", color = Muted)
-                            AuthCard(
-                                isRegistering = isRegistering,
+                        Text("Welcome to PrivPrint", color = Ink, fontSize = 27.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            "Sign in with your Xerox shop operator account or create a shop. Connecting this Windows station registers its encryption key.",
+                            color = InkMuted,
+                            fontSize = 14.sp,
+                        )
+                        AuthCard(
+                            isRegistering = isRegistering,
+                            busy = busy,
+                            error = error,
+                            onModeChange = {
+                                isRegistering = it
+                                error = null
+                                shops = emptyList()
+                                selectedShop = null
+                            },
+                            onSubmit = { fullName, email, password, shopName, address ->
+                                busy = true
+                                error = null
+                                scope.launch {
+                                    try {
+                                        shops = withContext(Dispatchers.IO) {
+                                            if (isRegistering) {
+                                                bridge.register(fullName, email, password, shopName, address)
+                                            } else {
+                                                bridge.login(email, password)
+                                            }
+                                        }
+                                        selectedShop = shops.firstOrNull()
+                                    } catch (exception: Exception) {
+                                        error = exception.message ?: "Account request failed."
+                                    } finally {
+                                        busy = false
+                                    }
+                                }
+                            },
+                        )
+                        if (shops.isNotEmpty()) {
+                            ShopPicker(
+                                shops = shops,
+                                selected = selectedShop,
                                 busy = busy,
                                 error = error,
-                                onModeChange = {
-                                    isRegistering = it
-                                    error = null
-                                    shops = emptyList()
-                                },
-                                onSubmit = { fullName, email, password, shopName, address ->
+                                onSelect = { selectedShop = it },
+                                onConnect = {
+                                    val selected = selectedShop ?: return@ShopPicker
                                     busy = true
                                     error = null
                                     scope.launch {
-                                        runCatching {
-                                            shops = withContext(Dispatchers.IO) {
-                                                if (isRegistering) {
-                                                    bridge.register(fullName, email, password, shopName, address)
-                                                } else {
-                                                    bridge.login(email, password)
-                                                }
+                                        try {
+                                            withContext(Dispatchers.IO) { bridge.connect(selected.id) }
+                                            refreshStatus()
+                                            refreshShop()
+                                            refreshQueue()
+                                            selectedPage = StationPage.OVERVIEW
+                                            actionMessage = "Shop connected and the Windows station key registered."
+                                        } catch (exception: Exception) {
+                                            if (status?.authenticated == true) {
+                                                statusError = exception.message ?: "Station connection failed."
+                                            } else {
+                                                error = exception.message ?: "Station connection failed."
                                             }
-                                            selectedShop = shops.firstOrNull()
-                                        }.onFailure { error = it.message ?: "Account request failed." }
-                                        busy = false
+                                        } finally {
+                                            busy = false
+                                        }
                                     }
                                 },
                             )
-                            if (shops.isNotEmpty()) {
-                                ShopPicker(
-                                    shops = shops,
-                                    selected = selectedShop,
-                                    busy = busy,
-                                    error = error,
-                                    onSelect = { selectedShop = it },
-                                    onConnect = {
-                                        val shop = selectedShop ?: return@ShopPicker
-                                        busy = true
-                                        error = null
-                                        scope.launch {
-                                            runCatching {
-                                                withContext(Dispatchers.IO) { bridge.connect(shop.id) }
-                                                refreshStatus()
-                                            }.onFailure { error = it.message ?: "Station connection failed." }
-                                            busy = false
-                                        }
-                                    },
-                                )
-                            }
-                        } else {
-                            Text("Connect a Xerox shop account to view ${selectedPage.title.lowercase()}.", color = Muted)
                         }
                     } else {
+                        statusError?.let { NoticeCard(it, isError = true) }
                         when (selectedPage) {
-                            StationPage.OVERVIEW -> {
-                                status?.let { ShopConnectedCard(it, error) }
-                                Text("Station overview", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                                Text("Jobs are received from the PrivPrint cloud and printed by this Windows station.", color = Muted)
-                            }
-                            StationPage.QUEUE -> PrintQueue(queue, queueBusy, queueError)
-                            StationPage.PRINTERS -> {
-                                actionMessage?.let { Text(it, color = if (it.contains("failed", true) || it.contains("could not", true)) Color(0xFFFCA5A5) else Green, fontSize = 12.sp) }
-                                status?.let { PrinterList(it.printers) }
-                            }
-                            StationPage.SECURITY -> {
-                                status?.let {
-                                    SecurityDetails(it, actionMessage) {
-                                        scope.launch {
-                                            actionMessage = null
-                                            runCatching {
-                                                withContext(Dispatchers.IO) { bridge.reconnectRealtime() }
-                                                actionMessage = "Cloud reconnect requested. The station will update its connection status automatically."
-                                            }.onFailure {
-                                                actionMessage = it.message ?: "Could not reconnect to the cloud."
+                            StationPage.OVERVIEW -> OverviewPage(
+                                status = status,
+                                shop = shop,
+                                queue = queue,
+                                actionMessage = actionMessage,
+                                autoPrintBusy = autoPrintBusy,
+                                onOpenQr = { selectedPage = StationPage.SHOP_QR },
+                                onOpenQueue = { selectedPage = StationPage.QUEUE },
+                                onOpenPrinters = { selectedPage = StationPage.PRINTERS },
+                                onToggleAutoPrint = { enabled ->
+                                    autoPrintBusy = true
+                                    actionMessage = null
+                                    scope.launch {
+                                        try {
+                                            withContext(Dispatchers.IO) {
+                                                bridge.setAutoPrintEnabled(enabled)
                                             }
+                                            refreshStatus()
+                                            actionMessage = if (enabled) {
+                                                "Automatic printing enabled."
+                                            } else {
+                                                "Automatic printing paused. Authorized jobs remain queued."
+                                            }
+                                        } catch (exception: Exception) {
+                                            actionMessage = exception.message ?: "Could not update auto-print setting."
+                                        } finally {
+                                            autoPrintBusy = false
                                         }
                                     }
-                                }
-                            }
+                                },
+                            )
+                            StationPage.SHOP_QR -> ShopQrPage(shop, actionMessage)
+                            StationPage.QUEUE -> PrintQueuePage(queue, queueBusy, queueError, actionMessage)
+                            StationPage.PRINTERS -> PrinterPage(status, actionMessage)
+                            StationPage.AUDIT -> AuditPage(status?.auditLog.orEmpty())
+                            StationPage.SECURITY -> StationSecurityPage(
+                                status = status,
+                                actionMessage = actionMessage,
+                                onReconnect = {
+                                    scope.launch {
+                                        actionMessage = null
+                                        runCatching {
+                                            withContext(Dispatchers.IO) { bridge.reconnectRealtime() }
+                                            actionMessage = "Cloud reconnect requested. Connection status will update automatically."
+                                        }.onFailure {
+                                            actionMessage = it.message ?: "Could not reconnect to the cloud."
+                                        }
+                                    }
+                                },
+                            )
                         }
                     }
                 }
 
-                if (selectedPage == StationPage.OVERVIEW) {
-                    Column(Modifier.width(300.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        MetricCard("Shop queue", queue.size.toString(), "Cloud jobs loaded when you open Print queue")
-                        MetricCard("Available printers", status?.printers?.size?.toString() ?: "—", "Detected from Windows")
-                        MetricCard("Completed this session", status?.completedJobCount?.toString() ?: "—", "Recent station activity")
+                if (status?.authenticated == true && selectedPage == StationPage.OVERVIEW) {
+                    Column(Modifier.width(280.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        MetricCard(
+                            "Shop queue",
+                            queue.size.toString(),
+                            "Cloud jobs currently in the queue",
+                            onClick = { selectedPage = StationPage.QUEUE },
+                        )
+                        MetricCard(
+                            "Windows printers",
+                            status?.printers?.size?.toString() ?: "0",
+                            "Detected on this station",
+                            onClick = { selectedPage = StationPage.PRINTERS },
+                        )
+                        MetricCard(
+                            "Completed this session",
+                            status?.completedJobCount?.toString() ?: "0",
+                            "Recent station print activity",
+                            onClick = { selectedPage = StationPage.AUDIT },
+                        )
                         StationSecurityCard(status)
                     }
                 }
@@ -357,110 +473,64 @@ private fun StationApplication(bridge: StationBridge) {
 }
 
 @Composable
-private fun NavLabel(label: String, selected: Boolean = false, onClick: () -> Unit = {}) {
+private fun NavLabel(page: StationPage, selected: Boolean, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth()
-            .background(if (selected) RaisedPanel else Color.Transparent, RoundedCornerShape(9.dp))
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (selected) BlueTint else Color.Transparent)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Box(Modifier.size(7.dp).background(if (selected) Cyan else Muted, RoundedCornerShape(50)))
-        Spacer(Modifier.width(11.dp))
-        Text(label, color = if (selected) Color.White else Muted, fontSize = 13.sp)
+        Text(page.symbol, color = if (selected) Blue else Muted, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        Text(
+            page.title,
+            color = if (selected) Color(0xFF1E40AF) else InkMuted,
+            fontSize = 13.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+        )
     }
 }
 
 @Composable
-private fun PrintQueue(jobs: List<PrintJobStatus>, loading: Boolean, error: String?) {
-        Text("Print queue", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-        Text("Live jobs for this shop, loaded from the shared PrivPrint cloud backend.", color = Muted)
-        if (loading) CircularProgressIndicator(color = Cyan, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
-        if (!error.isNullOrBlank()) Text(error, color = Color(0xFFFCA5A5), fontSize = 13.sp)
-        if (jobs.isEmpty() && !loading && error.isNullOrBlank()) Text("The cloud queue is empty.", color = Muted)
-        jobs.forEach { job ->
-            Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(12.dp)) {
-                Row(
-                    Modifier.fillMaxWidth().padding(18.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(18.dp),
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(job.id, color = Color.White, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            listOfNotNull(
-                                job.createdAt.takeIf(String::isNotBlank),
-                                job.copies.takeIf(String::isNotBlank)?.let { "$it copies" },
-                            ).joinToString(" · ").ifBlank { "Shop print job" },
-                            color = Muted,
-                            fontSize = 11.sp,
-                        )
-                    }
-                    StatusPill(job.status.ifBlank { "UNKNOWN" }, job.status == "COMPLETED")
-                }
-            }
-        }
-    }
-
-@Composable
-private fun SecurityDetails(status: StationStatus, message: String?, onReconnect: () -> Unit) {
-        Text("Security & station", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-        Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(14.dp)) {
-            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Shop: ${status.shopId}", color = Color.White)
-                Text("Station device: ${status.deviceId.ifBlank { "Not registered" }}", color = Muted)
-                Text("Backend: ${status.serverUrl}", color = Muted, fontSize = 11.sp)
-                StatusPill(
-                    if (status.encryptionKeyRegistered) "ENCRYPTION KEY REGISTERED" else "ENCRYPTION KEY NOT REGISTERED",
-                    status.encryptionKeyRegistered,
-                )
-                StatusPill("${status.connectionState}: ${if (status.realtimeConnected) "Connected" else "Not connected"}", status.realtimeConnected)
-                if (!status.connectionError.isNullOrBlank()) {
-                    Text("Realtime issue: ${status.connectionError}", color = Color(0xFFFFC66D), fontSize = 12.sp)
-                }
-                if (!message.isNullOrBlank()) Text(message, color = Muted, fontSize = 12.sp)
-                Button(
-                    onClick = onReconnect,
-                    colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Navy),
-                ) {
-                    Text("Reconnect cloud", fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-        Text("Recent station audit", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-        if (status.auditLog.isEmpty()) Text("No station events recorded in this session.", color = Muted)
-        status.auditLog.take(30).forEach { event ->
-            Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(9.dp)).padding(12.dp)) {
-                Text("${event.severity} · ${event.eventType}", color = if (event.severity == "ERROR") Color(0xFFFCA5A5) else Cyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                Text(event.details, color = Color.White, fontSize = 12.sp)
-            }
-        }
-    }
-
-@Composable
 private fun StatusPill(label: String, ready: Boolean) {
+    val failed = label.contains("FAILED", ignoreCase = true) ||
+        label.contains("ERROR", ignoreCase = true) ||
+        label.contains("OFFLINE", ignoreCase = true) ||
+        label.contains("SECURITY_ALERT", ignoreCase = true)
+    val background = when {
+        failed -> RedTint
+        ready -> GreenTint
+        else -> AmberTint
+    }
+    val foreground = when {
+        failed -> Red
+        ready -> Color(0xFF047857)
+        else -> Color(0xFFB45309)
+    }
     Text(
         label,
-        Modifier.background(
-            if (ready) Color(0xFF073B32) else Color(0xFF3D2B17),
-            RoundedCornerShape(30.dp),
-        ).padding(horizontal = 13.dp, vertical = 8.dp),
-        color = if (ready) Green else Color(0xFFFFC66D),
+        Modifier.background(background, RoundedCornerShape(30.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        color = foreground,
         fontSize = 10.sp,
         fontWeight = FontWeight.Bold,
     )
 }
 
 @Composable
-private fun MetricCard(title: String, value: String, detail: String) {
+private fun MetricCard(title: String, value: String, detail: String, onClick: () -> Unit) {
     Card(
-        colors = CardDefaults.cardColors(containerColor = Panel),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = CanvasWhite),
         shape = RoundedCornerShape(14.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Border),
     ) {
-        Column(Modifier.fillMaxWidth().padding(18.dp)) {
-            Text(title, color = Muted, fontSize = 12.sp)
-            Spacer(Modifier.height(8.dp))
-            Text(value, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+        Column(Modifier.fillMaxWidth().padding(17.dp)) {
+            Text(title, color = InkMuted, fontSize = 12.sp)
+            Spacer(Modifier.height(7.dp))
+            Text(value, color = Ink, fontSize = 27.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(3.dp))
             Text(detail, color = Muted, fontSize = 11.sp)
         }
@@ -468,64 +538,342 @@ private fun MetricCard(title: String, value: String, detail: String) {
 }
 
 @Composable
-private fun ShopConnectedCard(status: StationStatus, error: String?) {
-    Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(16.dp)) {
-        Column(Modifier.fillMaxWidth().padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Shop connected", color = Green, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            Text("Shop ID: ${status.shopId}", color = Color.White)
-            Text("Station ID: ${status.deviceId.ifBlank { "Registering…" }}", color = Muted, fontSize = 13.sp)
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                StatusPill(
-                    if (status.encryptionKeyRegistered) "KEY REGISTERED" else "KEY PENDING",
-                    status.encryptionKeyRegistered,
-                )
-                StatusPill(if (status.realtimeConnected) "ONLINE" else "RECONNECTING", status.realtimeConnected)
+private fun OverviewPage(
+    status: StationStatus?,
+    shop: ShopDetails?,
+    queue: List<PrintJobStatus>,
+    actionMessage: String?,
+    autoPrintBusy: Boolean,
+    onOpenQr: () -> Unit,
+    onOpenQueue: () -> Unit,
+    onOpenPrinters: () -> Unit,
+    onToggleAutoPrint: (Boolean) -> Unit,
+) {
+    Text("Shop dashboard", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+    Text("Your counter, print queue, printers and secure Windows station.", color = InkMuted, fontSize = 13.sp)
+    shop?.let { ShopIdentityCard(it, onOpenQr) }
+    actionMessage?.let { NoticeCard(it, isError = it.contains("could not", true) || it.contains("failed", true)) }
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        SummaryCard(
+            "Print queue",
+            queue.count { it.status !in setOf("COMPLETED", "FAILED", "CANCELLED", "EXPIRED") }.toString(),
+            "Open queue",
+            onOpenQueue,
+            Modifier.weight(1f),
+        )
+        SummaryCard(
+            "Printer",
+            status?.printers?.firstOrNull()?.status ?: "Not configured",
+            "Manage printers",
+            onOpenPrinters,
+            Modifier.weight(1f),
+        )
+    }
+    CardBlock {
+        Text("Direct auto-print", color = Ink, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Text(
+            "Automatically print jobs after the customer authorizes them. Turn this off to hold authorized jobs at the shop.",
+            color = InkMuted,
+            fontSize = 12.sp,
+        )
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                if (status?.autoPrintEnabled == true) "Automatic printing is on" else "Automatic printing is paused",
+                color = if (status?.autoPrintEnabled == true) Green else Amber,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Switch(
+                checked = status?.autoPrintEnabled == true,
+                onCheckedChange = onToggleAutoPrint,
+                enabled = !autoPrintBusy,
+            )
+        }
+    }
+    status?.let { ShopConnectedCard(it) }
+}
+
+@Composable
+private fun ShopIdentityCard(shop: ShopDetails, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = CanvasWhite),
+        shape = RoundedCornerShape(14.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Border),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            if (shop.permanentQrPayload.isNotBlank()) {
+                QrCodeCanvas(shop.permanentQrPayload, Modifier.size(72.dp))
+            } else {
+                Box(
+                    Modifier.size(72.dp).clip(RoundedCornerShape(10.dp)).background(SurfaceVariant),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("QR", color = Muted, fontWeight = FontWeight.Bold)
+                }
             }
-            if (!status.encryptionKeyRegistered) {
-                Text("Keep this app open while the station finishes secure registration.", color = Color(0xFFFFC66D), fontSize = 12.sp)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(shop.name, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(if (shop.verified) "✓" else "•", color = if (shop.verified) Green else Muted)
+                }
+                Text(shop.address.ifBlank { "Xerox shop" }, color = InkMuted, fontSize = 12.sp)
+                Text("Permanent counter QR · ${shop.id}", color = Muted, fontSize = 11.sp)
+                Text("Tap to display shop QR", color = Blue, fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
-            if (!error.isNullOrBlank()) Text(error, color = Color(0xFFFCA5A5), fontSize = 12.sp)
+        }
+    }
+}
+
+@Composable
+private fun SummaryCard(
+    title: String,
+    value: String,
+    action: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        modifier = modifier.clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = CanvasWhite),
+        shape = RoundedCornerShape(14.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Border),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(title, color = InkMuted, fontSize = 12.sp)
+            Text(value, color = Ink, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Text(action, color = Blue, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+private fun ShopQrPage(shop: ShopDetails?, actionMessage: String?) {
+    Text("Permanent counter QR", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+    Text("Customers scan this code in the PrivPrint Android app to choose your shop.", color = InkMuted, fontSize = 13.sp)
+    actionMessage?.let { NoticeCard(it, isError = false) }
+    if (shop == null || shop.permanentQrPayload.isBlank()) {
+        NoticeCard("Shop QR is unavailable. Refresh the shop details and try again.", isError = true)
+        return
+    }
+    CardBlock {
+        Text(shop.name, color = Ink, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+        Text(shop.address, color = InkMuted, fontSize = 13.sp)
+        Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+            QrCodeCanvas(shop.permanentQrPayload, Modifier.size(280.dp))
+        }
+        Text("Shop ID  ${shop.id}", color = Muted, fontSize = 12.sp)
+        Text("This permanent QR contains the shop ID only; it does not contain credentials.", color = InkMuted, fontSize = 12.sp)
+    }
+}
+
+@Composable
+private fun PrintQueuePage(
+    queue: List<PrintJobStatus>,
+    busy: Boolean,
+    error: String?,
+    actionMessage: String?,
+) {
+    Text("Print queue", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+    Text("Customer-authorized jobs are processed by this encrypted Windows station.", color = InkMuted, fontSize = 13.sp)
+    actionMessage?.let { NoticeCard(it, isError = false) }
+    when {
+        busy -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            CircularProgressIndicator(Modifier.size(20.dp), color = Blue, strokeWidth = 2.dp)
+            Text("Loading shop queue…", color = InkMuted, fontSize = 13.sp)
+        }
+        error != null -> NoticeCard(error, isError = true)
+        queue.isEmpty() -> CardBlock {
+            Text("No print jobs", color = Ink, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Text("New customer jobs will appear here after they are submitted to this shop.", color = InkMuted, fontSize = 12.sp)
+        }
+        else -> queue.forEach { job ->
+            CardBlock {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text("Job #${job.id.takeLast(8)}", color = Ink, fontWeight = FontWeight.Bold)
+                    StatusPill(job.status.replace('_', ' '), job.status in setOf("COMPLETED", "PRINTING"))
+                }
+                Text("${job.copies.ifBlank { "1" }} authorized copy/copies", color = InkMuted, fontSize = 12.sp)
+                if (job.createdAt.isNotBlank()) Text("Submitted ${job.createdAt}", color = Muted, fontSize = 11.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PrinterPage(status: StationStatus?, actionMessage: String?) {
+    Text("Connected printers", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+    Text("Windows printers detected by the station and synchronized with your shop.", color = InkMuted, fontSize = 13.sp)
+    actionMessage?.let {
+        NoticeCard(it, isError = it.contains("failed", true) || it.contains("could not", true))
+    }
+    val printers = status?.printers.orEmpty()
+    if (printers.isEmpty()) {
+        CardBlock {
+            Text("No Windows printers detected", color = Ink, fontWeight = FontWeight.Bold)
+            Text("Connect and install a printer in Windows, then choose Sync printers.", color = InkMuted, fontSize = 12.sp)
+        }
+    } else {
+        printers.forEach { printer ->
+            CardBlock {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(printer.name, color = Ink, fontWeight = FontWeight.SemiBold)
+                        Text(printer.model.ifBlank { "Windows printer" }, color = InkMuted, fontSize = 12.sp)
+                    }
+                    StatusPill(printer.status, printer.status == "READY")
+                }
+                HorizontalDivider(color = Border)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Paper", color = InkMuted, fontSize = 12.sp)
+                    Text(printer.paper.ifBlank { "Unknown" }, color = Ink, fontSize = 12.sp)
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Toner", color = InkMuted, fontSize = 12.sp)
+                    Text(printer.toner.takeIf(String::isNotBlank)?.let { "$it%" } ?: "Unknown", color = Ink, fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AuditPage(events: List<AuditEvent>) {
+    Text("Shop security audit", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+    Text("Recent Windows station events for printer, connection and key-registration activity.", color = InkMuted, fontSize = 13.sp)
+    if (events.isEmpty()) {
+        CardBlock {
+            Text("No station events recorded", color = Ink, fontWeight = FontWeight.Bold)
+            Text("Events will appear as this station connects and processes print jobs.", color = InkMuted, fontSize = 12.sp)
+        }
+    } else {
+        events.take(50).forEach { event ->
+            CardBlock {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(event.eventType.replace('_', ' '), color = Ink, fontWeight = FontWeight.SemiBold)
+                    StatusPill(event.severity, event.severity.equals("INFO", true))
+                }
+                Text(event.details, color = InkMuted, fontSize = 12.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun StationSecurityPage(
+    status: StationStatus?,
+    actionMessage: String?,
+    onReconnect: () -> Unit,
+) {
+    Text("Windows PC station", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+    Text("Station registration and encrypted printing health.", color = InkMuted, fontSize = 13.sp)
+    status?.let { ShopConnectedCard(it) }
+    CardBlock {
+        Text("Station security", color = Ink, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Text(
+            if (status?.encryptionKeyRegistered == true) {
+                "The station's encryption key is registered. This device can receive encrypted customer documents for this shop."
+            } else {
+                "The station key is not registered yet. Keep the app open and reconnect the shop station."
+            },
+            color = InkMuted,
+            fontSize = 12.sp,
+        )
+        Text("Private key storage: Windows protected user profile", color = Blue, fontSize = 12.sp)
+        Text("Connection: ${status?.connectionState ?: "UNKNOWN"}", color = InkMuted, fontSize = 12.sp)
+        if (status?.connectionError?.isNotBlank() == true) {
+            Text(status.connectionError, color = Red, fontSize = 12.sp)
+        }
+        actionMessage?.let { NoticeCard(it, isError = it.contains("could not", true)) }
+        OutlinedButton(onClick = onReconnect) {
+            Text("Reconnect to cloud")
+        }
+    }
+}
+
+@Composable
+private fun ShopConnectedCard(status: StationStatus) {
+    CardBlock {
+        Text("Shop connected", color = Green, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+        Text("Shop ID  ${status.shopId}", color = Ink)
+        Text("Station ID  ${status.deviceId.ifBlank { "Registering…" }}", color = InkMuted, fontSize = 12.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatusPill(
+                if (status.encryptionKeyRegistered) "KEY REGISTERED" else "KEY PENDING",
+                status.encryptionKeyRegistered,
+            )
+            StatusPill(if (status.realtimeConnected) "ONLINE" else "RECONNECTING", status.realtimeConnected)
+        }
+        if (!status.encryptionKeyRegistered) {
+            Text("Keep this app open while the station finishes secure registration.", color = Amber, fontSize = 12.sp)
         }
     }
 }
 
 @Composable
 private fun StationSecurityCard(status: StationStatus?) {
-    Card(colors = CardDefaults.cardColors(containerColor = RaisedPanel), shape = RoundedCornerShape(14.dp)) {
-        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-            Text("Station security", color = Color.White, fontWeight = FontWeight.Bold)
+    Card(
+        colors = CardDefaults.cardColors(containerColor = BlueTint),
+        shape = RoundedCornerShape(14.dp),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(17.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Station security", color = Ink, fontWeight = FontWeight.Bold)
             Text(
-                if (status?.encryptionKeyRegistered == true) "This station has a registered encryption key. Customer uploads can be securely addressed to this station."
-                else "Connect this Windows station to your shop to create and register its encryption key.",
-                color = Muted,
+                if (status?.encryptionKeyRegistered == true) "Encryption key registered"
+                else "Connect to register this station key",
+                color = InkMuted,
                 fontSize = 12.sp,
             )
-            Text("Private key storage: Windows protected profile", color = Cyan, fontSize = 11.sp)
+            Text("Windows protected storage", color = Blue, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }
 
 @Composable
-private fun PrinterList(printers: List<PrinterStatus>) {
-    Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(16.dp)) {
-        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Windows printers", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-            if (printers.isEmpty()) {
-                Text("No printers detected. Connect a printer and check that it appears in Windows Settings.", color = Muted, fontSize = 12.sp)
-            } else {
-                printers.forEach { printer ->
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(printer.name, color = Color.White, fontWeight = FontWeight.SemiBold)
-                            Text(printer.model, color = Muted, fontSize = 11.sp)
-                        }
-                        Text(printer.status, color = Green, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                    HorizontalDivider(color = RaisedPanel)
-                }
-            }
-        }
+private fun CardBlock(content: @Composable ColumnScope.() -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = CanvasWhite),
+        shape = RoundedCornerShape(14.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Border),
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(17.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            content = content,
+        )
     }
+}
+
+@Composable
+private fun NoticeCard(message: String, isError: Boolean) {
+    val foreground = if (isError) Red else Color(0xFF047857)
+    val background = if (isError) RedTint else GreenTint
+    Text(
+        message,
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(background).padding(12.dp),
+        color = foreground,
+        fontSize = 12.sp,
+    )
 }
 
 @Composable
@@ -542,30 +890,38 @@ private fun AuthCard(
     var shopName by remember { mutableStateOf("") }
     var address by remember { mutableStateOf("") }
 
-    Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(16.dp)) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = CanvasWhite),
+        shape = RoundedCornerShape(14.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Border),
+    ) {
         Column(Modifier.fillMaxWidth().padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(if (isRegistering) "Create your shop account" else "Sign in to your shop", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            if (isRegistering) {
-                FormField("Your name", fullName, { fullName = it })
-            }
+            Text(
+                if (isRegistering) "Create your shop account" else "Sign in to your shop",
+                color = Ink,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            if (isRegistering) FormField("Your name", fullName, { fullName = it })
             FormField("Email", email, { email = it })
             FormField("Password", password, { password = it }, secret = true)
             if (isRegistering) {
                 FormField("Shop name", shopName, { shopName = it })
                 FormField("Shop address", address, { address = it })
             }
-            if (!error.isNullOrBlank()) Text(error, color = Color(0xFFFCA5A5), fontSize = 12.sp)
+            if (!error.isNullOrBlank()) Text(error, color = Red, fontSize = 12.sp)
             Button(
                 enabled = !busy,
                 onClick = { onSubmit(fullName, email, password, shopName, address) },
                 modifier = Modifier.fillMaxWidth().height(46.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Navy),
+                colors = ButtonDefaults.buttonColors(containerColor = Blue, contentColor = CanvasWhite),
             ) {
                 if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                 else Text(if (isRegistering) "Create account and shop" else "Sign in", fontWeight = FontWeight.Bold)
             }
             TextButton(onClick = { onModeChange(!isRegistering) }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                Text(if (isRegistering) "Already have an account? Sign in" else "New shop? Create an account", color = Cyan)
+                Text(if (isRegistering) "Already have an account? Sign in" else "New shop? Create an account", color = Blue)
             }
         }
     }
@@ -592,45 +948,79 @@ private fun ShopPicker(
     onSelect: (ShopOption) -> Unit,
     onConnect: () -> Unit,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(16.dp)) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = CanvasWhite),
+        shape = RoundedCornerShape(14.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Border),
+    ) {
         Column(Modifier.fillMaxWidth().padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Choose your shop", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-            Box {
-                OutlinedTextField(
-                    value = selected?.name.orEmpty(),
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("Shop") },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Box(Modifier.matchParentSize().background(Color.Transparent).padding(1.dp))
-                TextButton(onClick = { expanded = true }, modifier = Modifier.align(Alignment.CenterEnd)) {
-                    Text("Select", color = Cyan)
+            Text("Choose your shop", color = Ink, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+            shops.forEach { shop ->
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                        .background(if (selected?.id == shop.id) BlueTint else Background)
+                        .clickable { onSelect(shop) }
+                        .padding(13.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(shop.name, color = Ink, fontWeight = FontWeight.SemiBold)
+                        Text(shop.id, color = Muted, fontSize = 11.sp)
+                    }
+                    Text(if (selected?.id == shop.id) "Selected" else "Select", color = Blue, fontSize = 12.sp)
                 }
-                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                    shops.forEach { shop ->
-                        DropdownMenuItem(
-                            text = { Text("${shop.name}  ·  ${shop.id}") },
-                            onClick = {
-                                onSelect(shop)
-                                expanded = false
-                            },
-                        )
+            }
+            if (!error.isNullOrBlank()) Text(error, color = Red, fontSize = 12.sp)
+            Button(
+                enabled = selected != null && !busy,
+                onClick = onConnect,
+                modifier = Modifier.fillMaxWidth().height(46.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Blue, contentColor = CanvasWhite),
+            ) {
+                if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                else Text("Connect shop and register station", fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun QrCodeCanvas(payload: String, modifier: Modifier = Modifier) {
+    val matrix = remember(payload) {
+        val hints = mapOf(
+            EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
+            EncodeHintType.MARGIN to 1,
+            EncodeHintType.CHARACTER_SET to "UTF-8",
+        )
+        val encoded = QRCodeWriter().encode(payload, BarcodeFormat.QR_CODE, 0, 0, hints)
+        Array(encoded.height) { row ->
+            BooleanArray(encoded.width) { column -> encoded.get(column, row) }
+        }
+    }
+
+    Box(
+        modifier.clip(RoundedCornerShape(12.dp)).background(CanvasWhite).padding(12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val rows = matrix.size
+            val columns = matrix.firstOrNull()?.size ?: 0
+            if (rows > 0 && columns > 0) {
+                val moduleWidth = size.width / columns
+                val moduleHeight = size.height / rows
+                for (row in 0 until rows) {
+                    for (column in 0 until columns) {
+                        if (matrix[row][column]) {
+                            drawRect(
+                                color = Ink,
+                                topLeft = Offset(column * moduleWidth, row * moduleHeight),
+                                size = Size(moduleWidth + 0.4f, moduleHeight + 0.4f),
+                            )
+                        }
                     }
                 }
             }
-            if (!error.isNullOrBlank()) Text(error, color = Color(0xFFFCA5A5), fontSize = 12.sp)
-            Button(
-                enabled = !busy && selected != null,
-                onClick = onConnect,
-                modifier = Modifier.fillMaxWidth().height(46.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Navy),
-            ) {
-                if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                else Text("Connect this Windows station", fontWeight = FontWeight.Bold)
-            }
-            Text("Connecting registers this device and its encryption key with your shop.", color = Muted, fontSize = 11.sp)
         }
     }
 }

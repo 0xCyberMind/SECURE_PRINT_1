@@ -13,6 +13,7 @@ dependencies {
   implementation(compose.material3)
   implementation("com.squareup.okhttp3:okhttp:4.12.0")
   implementation("com.google.code.gson:gson:2.13.2")
+  implementation("com.google.zxing:core:3.5.3")
 }
 
 val stationAgent = rootProject.file("windows_agent/dist/PrivPrintStationWorker.exe")
@@ -28,7 +29,7 @@ compose.desktop {
 
     nativeDistributions {
       packageName = "PrivPrint Shop Station"
-      packageVersion = "1.0.0"
+      packageVersion = "1.0.1"
       description = "PrivPrint secure Windows shop station"
       vendor = "PrivPrint"
       targetFormats(org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe, org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi)

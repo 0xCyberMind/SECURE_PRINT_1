@@ -17,6 +17,14 @@ import java.time.Duration
 
 data class ShopOption(val id: String, val name: String)
 
+data class ShopDetails(
+    val id: String,
+    val name: String,
+    val address: String,
+    val permanentQrPayload: String,
+    val verified: Boolean,
+)
+
 data class PrinterStatus(
     val name: String,
     val model: String,
@@ -49,6 +57,7 @@ data class StationStatus(
     val connectionState: String = "DISCONNECTED",
     val connectionError: String = "",
     val workerExecutable: String = "",
+    val autoPrintEnabled: Boolean = true,
     val printers: List<PrinterStatus> = emptyList(),
     val auditLog: List<AuditEvent> = emptyList(),
     val activeJobCount: Int = 0,
@@ -136,6 +145,22 @@ class StationBridge {
 
     fun connect(shopId: String) {
         post("/api/auth/connect", mapOf("shop_id" to shopId))
+    }
+
+    fun shopDetails(): ShopDetails {
+        val json = get("/api/shop")
+        return ShopDetails(
+            id = json.stringOrEmpty("id"),
+            name = json.stringOrEmpty("name").ifBlank { "Xerox shop" },
+            address = json.stringOrEmpty("address"),
+            permanentQrPayload = json.stringOrEmpty("permanent_qr_payload")
+                .ifBlank { json.stringOrEmpty("permanentQrPayload") },
+            verified = json.booleanOrFalse("is_verified"),
+        )
+    }
+
+    fun setAutoPrintEnabled(enabled: Boolean) {
+        post("/api/settings/auto-print", mapOf("enabled" to enabled.toString()))
     }
 
     fun status(): StationStatus =
@@ -226,6 +251,7 @@ class StationBridge {
             connectionState = json.stringOrEmpty("connection_state").ifBlank { "DISCONNECTED" },
             connectionError = json.stringOrEmpty("connection_error"),
             workerExecutable = json.stringOrEmpty("worker_executable"),
+            autoPrintEnabled = json.booleanOrFalse("auto_print_enabled"),
             printers = printers.mapNotNull { element ->
                 element.takeIf { it.isJsonObject }?.asJsonObject?.let { printer ->
                     PrinterStatus(
@@ -255,6 +281,17 @@ class StationBridge {
     private fun post(path: String, payload: Map<String, String>): JsonObject {
         val body = gson.toJson(payload).toRequestBody("application/json".toMediaType())
         val request = Request.Builder().url("$baseUrl$path").post(body).build()
+        client.newCall(request).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw IOException(responseDetail(text, response.code))
+            }
+            return JsonParser.parseString(text).asJsonObject
+        }
+    }
+
+    private fun get(path: String): JsonObject {
+        val request = Request.Builder().url("$baseUrl$path").get().build()
         client.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) {

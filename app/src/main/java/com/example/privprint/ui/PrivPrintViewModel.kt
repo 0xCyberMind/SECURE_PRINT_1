@@ -103,6 +103,8 @@ data class ShopUiState(
 class PrivPrintViewModel(application: Application) : AndroidViewModel(application) {
 
     private val prefs = application.getSharedPreferences("privprint_preferences", Context.MODE_PRIVATE)
+    private var shopConnectionInProgress = false
+    private var shopSessionRetryUntilMillis = 0L
 
     private val db = PrivPrintDatabase.getInstance(application)
     val authTokenManager = AuthTokenManager(application)
@@ -282,6 +284,16 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun connectToReadyShop(shop: Shop, qrPayload: String? = null) {
+        val now = System.currentTimeMillis()
+        val retryRemainingSeconds = ((shopSessionRetryUntilMillis - now + 999) / 1000).coerceAtLeast(0)
+        if (retryRemainingSeconds > 0) {
+            val message = "Please wait $retryRemainingSeconds seconds before scanning this shop again."
+            _userUiState.value = _userUiState.value.copy(scannerError = message, toastMessage = message)
+            return
+        }
+        if (shopConnectionInProgress) return
+
+        shopConnectionInProgress = true
         viewModelScope.launch {
             try {
                 if (repository.getShopPrintKeys(shop.id).isEmpty()) {
@@ -304,11 +316,31 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
                 )
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                val message = "Shop ${shop.id}: ${e.message ?: "Windows station is not ready."}"
+                val detail = e.message ?: "Windows station is not ready."
+                val retryAfterSeconds = if (detail.contains("HTTP 429")) {
+                    Regex("\"retry_after\"\\s*:\\s*(\\d+)")
+                        .find(detail)
+                        ?.groupValues
+                        ?.getOrNull(1)
+                        ?.toLongOrNull()
+                        ?: 45L
+                } else {
+                    0L
+                }
+                if (retryAfterSeconds > 0) {
+                    shopSessionRetryUntilMillis = System.currentTimeMillis() + retryAfterSeconds * 1000
+                }
+                val message = if (retryAfterSeconds > 0) {
+                    "Shop ${shop.id}: Too many QR connection attempts. Please wait $retryAfterSeconds seconds, then scan once."
+                } else {
+                    "Shop ${shop.id}: $detail"
+                }
                 _userUiState.value = _userUiState.value.copy(
                     scannerError = message,
                     toastMessage = message
                 )
+            } finally {
+                shopConnectionInProgress = false
             }
         }
     }
