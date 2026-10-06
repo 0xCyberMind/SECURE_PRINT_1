@@ -142,14 +142,25 @@ class Settings(BaseSettings):
             problems.append("DATABASE_URL must target a remote PostgreSQL service with credentials")
 
         redis = urlsplit(self.REDIS_URL)
+        render_internal_redis = (
+            redis.scheme == "redis"
+            and redis.hostname is not None
+            and redis.hostname.startswith("red-")
+            and redis.port == 6379
+            and not redis.username
+            and not redis.password
+        )
         if (
             redis.scheme not in {"redis", "rediss"}
             or not redis.hostname
             or redis.hostname in {"localhost", "127.0.0.1", "::1"}
-            or not redis.password
-            or "REPLACE_WITH" in redis.password.upper()
+            or (not redis.password and not render_internal_redis)
+            or "REPLACE_WITH" in (redis.password or "").upper()
         ):
-            problems.append("REDIS_URL must target a remote Redis service with authentication")
+            problems.append(
+                "REDIS_URL must target an authenticated remote Redis service or "
+                "a passwordless Render internal Redis service"
+            )
 
         storage = urlsplit(self.STORAGE_ENDPOINT)
         if (

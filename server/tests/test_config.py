@@ -55,6 +55,15 @@ def test_production_configuration_accepts_secure_remote_dependencies():
     assert settings.ENVIRONMENT == EnvironmentType.PRODUCTION
 
 
+def test_production_accepts_passwordless_render_internal_redis_url():
+    values = _valid_production_settings()
+    values["REDIS_URL"] = "redis://red-db153c7avr4c73aacn30:6379"
+
+    settings = Settings(**values)
+
+    assert settings.REDIS_URL == values["REDIS_URL"]
+
+
 @pytest.mark.parametrize(
     "database_url",
     [
@@ -74,6 +83,7 @@ def test_database_provider_urls_use_asyncpg_driver(database_url):
         {"DEBUG": True},
         {"DATABASE_URL": "postgresql+asyncpg://privprint:password@localhost/privprint"},
         {"REDIS_URL": "redis://localhost:6379/0"},
+        {"REDIS_URL": "redis://redis.example.com:6379/0"},
         {"STORAGE_ENDPOINT": "http://storage.example.com"},
         {"STORAGE_USE_SSL": False},
     ],

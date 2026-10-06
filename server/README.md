@@ -56,21 +56,22 @@ Render's custom-domain routing or certificates.
 
 ### Render environment settings
 
-Render must provide an authenticated remote Redis connection URL as
-`REDIS_URL` (for example, a private Redis URL in the form
-`redis://:<password>@<host>:<port>/<db>` or a TLS URL beginning with `rediss://`).
-Use the connection string from the Redis service and store it as a secret; do
-not paste credentials into source control. The URL must include a password.
-The application intentionally refuses to start in production without it
-because the production rate limiter and realtime features depend on Redis.
+Render must provide the Redis service's **Internal URL** as `REDIS_URL`.
+Render internal Key Value URLs use private service networking and can have
+the form `redis://red-<service-id>:6379` without a password. The production
+configuration accepts that Render-internal form, as well as authenticated
+remote Redis URLs such as `redis://:<password>@<host>:<port>/<db>` and TLS
+URLs beginning with `rediss://`. Do not use a public URL without
+authentication. The application intentionally refuses to start in production
+without a valid remote Redis configuration because the production rate limiter
+and realtime features depend on Redis.
 
 Set `ENVIRONMENT=production` and `DEBUG=false`. Keep `SECRET_KEY`,
 `DATABASE_URL`, and HTTPS object-storage credentials configured in Render's
 environment/secrets. If startup logs report
-`REDIS_URL must target a remote Redis service with authentication`, attach or
-provision an authenticated Redis service, then set `REDIS_URL` to its
-credential-bearing private connection URL and redeploy. Do not disable the
-production validation to work around missing services.
+`REDIS_URL must target ...`, verify that `REDIS_URL` exactly matches the Redis
+service's Internal URL, then redeploy. Do not disable the production
+validation to work around missing services.
 
 Create a private production environment file from the placeholder-only sample:
 
