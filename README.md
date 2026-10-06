@@ -1,218 +1,235 @@
-# PrivPrint
+<p align="center">
+  <svg xmlns="http://www.w3.org/2000/svg" width="92" height="92" viewBox="0 0 92 92" role="img" aria-labelledby="privprint-logo-title">
+    <title id="privprint-logo-title">PrivPrint shield, document, and print mark</title>
+    <path d="M46 5 78 17v23c0 21-13 37-32 47C27 77 14 61 14 40V17L46 5Z" fill="none" stroke="#2F80ED" stroke-width="5" stroke-linejoin="round"/>
+    <path d="M34 25h20l9 9v29H34V25Z" fill="none" stroke="#F3F4F6" stroke-width="4" stroke-linejoin="round"/>
+    <path d="M53 25v10h10M40 43h17M40 50h17M40 57h11" fill="none" stroke="#F3F4F6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M25 72h42" fill="none" stroke="#2F80ED" stroke-width="4" stroke-linecap="round"/>
+  </svg>
+  <br>
+  <strong>PRIVPRINT</strong>
+  <br>
+  <sub>PRIVATE BY DESIGN. PRINTED ON YOUR TERMS.</sub>
+</p>
 
-**Privacy-conscious printing from an Android phone to a connected shop station.**
+<p align="center">
+  <a href="https://developer.android.com"><img alt="Android and Kotlin" src="https://img.shields.io/badge/Android-Kotlin%20%7C%20Compose-3DDC84?logo=android&logoColor=white"></a>
+  <a href="https://fastapi.tiangolo.com/"><img alt="Backend: FastAPI" src="https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white"></a>
+  <a href="https://www.jetbrains.com/lp/compose-multiplatform/"><img alt="Windows client: Compose Desktop" src="https://img.shields.io/badge/Windows-Compose%20Desktop-0078D4?logo=windows&logoColor=white"></a>
+  <img alt="Document encryption: AES-256-GCM" src="https://img.shields.io/badge/Document%20encryption-AES--256--GCM-243B53">
+</p>
 
-PrivPrint is a multi-component print workflow: customers prepare and submit a
-document in the Android app, a shop operator manages a Windows station and its
-printers, and a backend coordinates authentication, sessions, jobs, and delivery.
-The Android and Windows clients use the same versioned API.
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="#security-and-privacy">Security</a> ·
+  <a href="#build-and-test">Build and test</a> ·
+  <a href="#deployment">Deployment</a>
+</p>
 
-> **Status:** This repository is under active development. The production API
-> Render API URL configured in the clients is
-> `https://secure-print-1.onrender.com/`. The optional self-hosted Compose
-> gateway uses `api.privprint.com`, which requires its own DNS and TLS setup.
+> **Project status:** PrivPrint is under active development. The production
+> API configured for the clients is `https://secure-print-1.onrender.com/`.
+> Check `/healthz` before relying on a deployment. A badge or security design
+> description is not a certification or a guarantee that a deployment is safe.
 
-[![Android](https://img.shields.io/badge/Android-Kotlin%20%7C%20Compose-3DDC84?logo=android&logoColor=white)](https://developer.android.com)
-[![Backend](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Windows](https://img.shields.io/badge/Windows-Compose%20Desktop-0078D4?logo=windows&logoColor=white)](https://www.jetbrains.com/lp/compose-multiplatform/)
+PrivPrint connects an Android customer app, a shop's Windows print station, and
+a cloud API to coordinate encrypted document delivery and printing. The Android
+client encrypts document content before upload. The authorized station decrypts
+it for printing; the service coordinates accounts, shops, sessions, devices,
+jobs, status, and cleanup.
 
 ## Contents
 
-- [Product overview](#product-overview)
-- [How a print job works](#how-a-print-job-works)
-- [Repository layout](#repository-layout)
-- [Technology](#technology)
-- [Requirements](#requirements)
-- [Run locally](#run-locally)
-- [Build the clients](#build-the-clients)
-- [Run tests](#run-tests)
-- [Configuration](#configuration)
+- [Features](#features)
+- [Architecture](#architecture)
 - [Security and privacy](#security-and-privacy)
-- [Production deployment](#production-deployment)
+- [Repository layout](#repository-layout)
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
+- [Build and test](#build-and-test)
+- [Configuration](#configuration)
+- [Deployment](#deployment)
 - [Troubleshooting](#troubleshooting)
+- [Roadmap direction](#roadmap-direction)
 - [Contributing](#contributing)
+- [Security reporting](#security-reporting)
+- [License](#license)
 
-## Product overview
+## Features
 
-PrivPrint includes three primary components:
+- Android app for customer and shop workflows, including accounts, shop
+  discovery, document selection, print options, job status, and shop operations.
+- Windows shop station that connects directly to the cloud API over HTTPS/WSS,
+  manages its station identity, shows the job queue, and prints through the
+  Windows-installed printers.
+- Client-side AES-256-GCM document encryption and station-specific RSA-OAEP
+  wrapping of the document key.
+- FastAPI backend for authentication, shops, devices, sessions, print jobs,
+  printer coordination, real-time updates, and document cleanup.
+- Local Docker Compose development stack with PostgreSQL, Redis, MinIO, an API,
+  and a cleanup worker.
 
-| Component | Purpose |
-| --- | --- |
-| **Android app** (`:app`) | Customer and shop workflows: account access, shop discovery and QR connection, document selection, print options, job status, and shop operations. |
-| **Windows Shop Station** (`:windowsApp`) | Native desktop interface for shop-operator access, station connection, shop QR, print queue, printer status, and station settings. |
-| **Windows station worker** (`windows_agent/`) | Authenticates the station with the backend, registers its public print key, synchronizes printers, receives authorized work, and integrates with the Windows print spooler. |
-| **Backend** (`server/`) | FastAPI service for authentication, shops, devices, sessions, encrypted document uploads, print jobs, printer coordination, health checks, and cleanup. |
-
-The Windows desktop app packages and starts the station worker; the worker
-communicates with the backend over outbound API and realtime connections.
-
-## How a print job works
-
-1. A customer signs in to the Android app and selects a shop, commonly by
-   scanning the shop's QR code.
-2. The app establishes a time-bounded session with the backend and selects a
-   document and print options.
-3. The Android client encrypts document content before upload. The backend
-   stores encrypted content and job metadata; it does not need the document's
-   plaintext to coordinate the workflow.
-4. The shop station authenticates as a print device. Its public encryption key
-   is registered with the backend; the station's private key is protected in
-   local Windows credential storage.
-5. The shop station retrieves authorized work, verifies and decrypts the
-   station-bound content in memory, and submits the document to the Windows
-   print spooler.
-6. Job progress, copy counts, and cleanup status are synchronized with the
-   backend.
+## Architecture
 
 ```mermaid
-sequenceDiagram
-    actor Customer
-    participant Android
-    participant API as PrivPrint API
-    participant Station as Windows Shop Station
-    participant Printer
-
-    Customer->>Android: Choose shop, document, and print options
-    Android->>API: Create session and upload encrypted document
-    Android->>API: Submit and authorize print job
-    Station->>API: Authenticate device and poll/subscribe for jobs
-    API-->>Station: Authorized job and station-bound encrypted content
-    Station->>Station: Verify, decrypt in memory, prepare print
-    Station->>Printer: Submit print job
-    Station->>API: Report progress and completed copies
-    API-->>Android: Job status updates
+flowchart LR
+    A[Android app] -->|HTTPS: auth, shops, sessions, jobs| API[FastAPI cloud API]
+    A -->|AES-256-GCM ciphertext| S3[S3-compatible object storage]
+    A -->|station-wrapped document key| API
+    W[Windows Shop Station] -->|HTTPS: station auth and authorized jobs| API
+    W <-->|WSS: queue and status events| API
+    API --> DB[(PostgreSQL)]
+    API <--> R[(Redis)]
+    API -->|short-lived upload/download URLs| S3
+    W -->|decrypt authorized document for printing| P[Windows printer and driver]
 ```
+
+### Print-job flow
+
+1. The customer selects a shop, document, and print options in the Android app.
+2. The Android client encrypts the document with AES-256-GCM and wraps its
+   per-document key for the registered station's RSA public key.
+3. The client uploads the ciphertext to configured S3-compatible storage and
+   submits the job metadata and wrapped key to the API.
+4. The authenticated Windows station receives authorized job information,
+   downloads the ciphertext, unwraps its key, and decrypts the document in
+   memory for printing.
+5. The station reports job progress; the API coordinates status and cleanup.
+
+The backend and object storage handle encrypted document content. Decryption is
+required at the authorized print station so the document can be rendered and
+printed; paper output is outside the digital encryption boundary.
+
+## Security and privacy
+
+- **Document encryption:** The Android client uses AES/GCM with a 256-bit key,
+  a fresh 12-byte nonce, and a 128-bit authentication tag. The document key is
+  wrapped for a registered station using RSA-OAEP with SHA-256.
+- **Station identity:** The Windows station uses its registered device
+  credentials and private key to receive station-bound jobs. Windows DPAPI
+  protects the station credential file for the signed-in Windows user.
+- **Transport and storage:** Client/API traffic uses HTTPS/WSS in production;
+  document bytes are encrypted before upload to configured S3-compatible
+  storage.
+- **Print boundary:** The authorized station must decrypt content in memory to
+  print it. Once printed, physical handling and collection of pages are the
+  user's responsibility.
+- **Limits:** Best-effort clearing of application buffers cannot guarantee
+  erasure from every runtime, operating-system, storage-provider, or printer
+  layer. Encryption does not replace secure account, endpoint, or deployment
+  configuration.
+
+See [SECURITY.md](SECURITY.md) for the repository's security specification and
+threat-model notes. Review deployment settings and data-retention behavior
+before handling sensitive documents.
 
 ## Repository layout
 
 ```text
 .
 ├── app/                         Android application
-├── windowsApp/                  Native Windows shop-station UI
-├── windows_agent/               Windows worker and printer integration
-├── server/                      FastAPI backend, migrations, Compose, tests
-├── gradle/                      Gradle version catalog and wrapper support
-├── start_privprint.ps1          Local development stack helper (Windows)
+├── windowsApp/                  Native Windows shop-station application
+├── windows_agent/               Separate Windows worker and printer utilities
+├── server/                      FastAPI backend, migrations, tests, and Compose
+├── gradle/                      Gradle wrapper support and dependency catalog
+├── SECURITY.md                  Security specification and threat model
+├── RUN_LOCALLY.md               Local development notes
 └── README.md
 ```
 
-## Technology
-
-- **Android:** Kotlin, Jetpack Compose, Android Gradle Plugin, Retrofit/OkHttp,
-  Room, and Android platform APIs.
-- **Windows desktop:** Kotlin, Jetpack Compose Desktop, and Gradle packaging.
-- **Windows worker:** Python, HTTPX, cryptography, and Windows print-spooler
-  integration.
-- **Backend:** Python, FastAPI, Pydantic Settings, SQLAlchemy async, Alembic,
-  PostgreSQL, Redis, and S3-compatible object storage.
-- **Local development infrastructure:** Docker Compose with PostgreSQL, Redis,
-  MinIO, API, and cleanup worker.
+The Windows desktop application communicates directly with the cloud API; its
+MSI does not need to start a local HTTP service or package the separate Python
+worker. The `windows_agent/` directory remains a distinct project component.
 
 ## Requirements
 
-Install the tools for the component(s) you intend to run:
+Install only the tools needed for the component you intend to work on:
 
-- **Android:** Android Studio/Android SDK and JDK 17 (see the Gradle and Android
-  plugin configuration if your environment requires a specific SDK).
-- **Windows desktop packaging:** JDK 17 and Windows. Python plus PyInstaller
-  are needed to build the bundled station worker.
-- **Backend/local full stack:** Docker Desktop with Docker Compose.
-- **Backend tests without Docker:** Python 3.12 recommended by the backend
-  container image, plus the packages in `server/requirements.txt`.
+- **Android:** Android Studio/Android SDK and JDK 17.
+- **Windows station package:** Windows and JDK 17.
+- **Backend local stack:** Docker Desktop with Docker Compose v2.
+- **Backend tests without Docker:** Python 3.12 recommended; dependencies are
+  listed in `server/requirements.txt`.
+- **Legacy Windows worker utilities:** Windows and the Python dependencies
+  documented in `windows_agent/README.md`.
 
-## Run locally
+## Quick start
 
-### Start the local backend stack
+### Start the local backend
 
-On Windows, from the repository root:
+From the repository root in PowerShell:
 
 ```powershell
 Copy-Item server\.env.example server\.env.development
 ```
 
-Review `server\.env.development` and use local-only credentials. Keep
-environment files private; never commit populated secrets. Then start the
-development stack:
+Review `server\.env.development` and keep development credentials local. Start
+the API, cleanup worker, PostgreSQL, Redis, and MinIO:
 
 ```powershell
 docker compose -f server\docker-compose.yml up -d --build
 ```
 
-The Compose stack exposes the API at `http://localhost:8080`, PostgreSQL at
-`localhost:5432`, Redis at `localhost:6379`, and the MinIO API/console at ports
-`9000`/`9001`. The API health endpoint is:
+The local API health check is `http://localhost:8080/healthz`. The development
+API docs are available at `http://localhost:8080/api/v1/docs` when enabled by
+the environment. MinIO's API and console use ports `9000` and `9001`.
 
-```text
-http://localhost:8080/healthz
-```
-
-When running the backend directly, the FastAPI development docs are available at
-`http://localhost:8080/api/v1/docs` when the environment is not production.
-
-To stop the local services:
+Stop the stack with:
 
 ```powershell
 docker compose -f server\docker-compose.yml down
 ```
 
 The development Compose file does not declare a persistent PostgreSQL data
-volume. Removing the database container therefore removes its container-local
-database data; export anything you need before taking the stack down.
+volume. Removing its database container can remove its container-local data.
 
-### Connect the Android app to the local API
+### Run the Android app against the local API
 
-For an Android emulator, the host machine is reachable at `10.0.2.2`. Build and
-install the debug app from the repository root:
+For an Android emulator, use the host alias `10.0.2.2`:
 
 ```powershell
 .\gradlew.bat :app:installDebug -PDEBUG_API_BASE_URL=http://10.0.2.2:8080/
 ```
 
-For a physical Android phone, use the development computer's LAN IP address
-instead of `10.0.2.2`, ensure both devices can reach each other, and configure
-Android network security for the chosen local HTTP host as required by the
-project. Do not use an unencrypted HTTP endpoint for production.
+For a physical phone, use the development computer's reachable LAN address and
+configure the local development environment for that host. Do not use a local
+HTTP endpoint for production.
 
-### Start the Windows Shop Station
+### Run the Windows Shop Station
 
-Build the worker executable and then package the desktop application:
+Build the MSI on Windows from the repository root:
 
 ```powershell
-.\windows_agent\build_windows_exe.ps1
 .\gradlew.bat :windowsApp:packageMsi
 ```
 
-For an EXE installer, use `:windowsApp:packageExe` instead. Installer outputs
-are written under `windowsApp\build\compose\binaries\main`. Install and open the
-desktop app, sign in or create the shop operator account, then choose **Connect
-this Windows station**. Keep the station app running while it processes jobs.
+The installer is written under
+`windowsApp\build\compose\binaries\main\msi`. Install the shop's printer and
+driver in Windows, then sign in and connect the station to the correct shop.
+See [Windows station instructions](windowsApp/README.md).
 
-See [Windows station instructions](windowsApp/README.md) for additional build
-and installation details.
+## Build and test
 
-## Build the clients
+Run commands from the repository root.
 
-From the repository root:
+### Build
 
 ```powershell
 # Android debug APK
 .\gradlew.bat :app:assembleDebug
 
-# Native Windows app compilation
+# Windows desktop application compilation
 .\gradlew.bat :windowsApp:compileKotlin
 
-# Windows MSI package (requires the worker build first)
-.\windows_agent\build_windows_exe.ps1
+# Windows MSI installer
 .\gradlew.bat :windowsApp:packageMsi
 ```
 
-The Android debug APK is produced under
-`app\build\outputs\apk\debug\`. Build outputs are generated locally and are not
-source files.
+The Android debug APK is generated under `app\build\outputs\apk\debug`.
+Windows MSI packages are generated under
+`windowsApp\build\compose\binaries\main\msi`.
 
-## Run tests
-
-From the repository root:
+### Test
 
 ```powershell
 # Android unit tests
@@ -221,106 +238,86 @@ From the repository root:
 # Backend tests
 python -m pytest server\tests -q
 
-# Windows worker tests
+# Separate Windows worker tests
 python -m pytest windows_agent\tests -q
 ```
 
-Use the Python interpreter/environment configured for the project if `python`
-does not resolve to the intended environment. Backend integration tests use
-the repository's test configuration; external production services should not
-be contacted by unit tests.
+Use the project's configured Python environment if `python` does not resolve
+to the intended interpreter. The separate worker tests may require Windows
+specific dependencies.
 
 ## Configuration
 
-### API endpoints
+- The clients' current cloud API target is
+  `https://secure-print-1.onrender.com/`. Confirm that
+  `https://secure-print-1.onrender.com/healthz` is healthy before a release.
+- Android debug builds accept the `DEBUG_API_BASE_URL` Gradle property.
+  Android release builds accept `RELEASE_API_BASE_URL`.
+- The self-hosted hostname `api.privprint.com` is not interchangeable with the
+  Render service URL. Use it only after DNS, TLS, and backend routing have been
+  configured and verified.
+- Backend CORS, database, Redis, signing key, and object-storage settings must
+  be configured for the deployment environment. Keep populated environment
+  files, access tokens, passwords, and private keys out of Git and support logs.
 
-The current Render API URL configured for client builds is
-`https://secure-print-1.onrender.com/`. `https://api.privprint.com/` is only
-usable after its DNS and TLS are configured to route to a running backend.
+Changing an API URL in a client does not provision, validate, or secure the
+service behind that URL.
 
-- Android production/debug defaults are defined in `app/build.gradle.kts`.
-  Override the debug endpoint with the `DEBUG_API_BASE_URL` Gradle property.
-- The Windows worker's production default is defined in
-  `windows_agent/config.py`.
-- Backend CORS origins are controlled by `CORS_ORIGINS`.
+## Deployment
 
-Ensure the domain, DNS record, TLS certificate, backend deployment, CORS
-settings, and client release configuration agree before publishing an app.
-Changing a client URL alone does not provision or verify a live backend.
-
-### Station credentials
-
-The Windows worker keeps operator/device credentials and station private-key
-material in its protected local credential store. Its example JSON file is for
-non-secret configuration only. Do not share the station credential directory
-or put credentials, API keys, access tokens, or private keys in issue reports.
-
-## Security and privacy
-
-- Document encryption is performed by the Android client before encrypted
-  content is sent to the backend.
-- Station delivery is tied to an authenticated print device and its registered
-  public key.
-- The Windows worker decrypts content in memory for printing and clears
-  sensitive buffers when processing finishes.
-- Backend routes enforce role and ownership checks for customer, operator, and
-  station actions.
-- Print-job copy limits and state transitions are enforced by the backend.
-- Development settings are not production settings. Production requires
-  non-default secrets and authenticated infrastructure,
-  TLS, and production object storage.
-
-These controls do not replace a security audit or guarantee that every
-deployment is secure. Protect operator accounts and station machines, restrict
-access to infrastructure secrets, monitor logs for accidental sensitive data,
-and review retention and backup policies for the deployed storage services.
-Report suspected vulnerabilities privately to the repository maintainers; do
-not post exploit details or user data in public issues.
-
-## Production deployment
-
-Production Compose deployment, secret injection, TLS certificate provisioning
-and renewal, and startup preflight instructions live in
-[the backend operations guide](server/README.md). The production Compose file
-is `server/docker-compose.prod.yml`; it is separate from the local development
-stack.
+The backend operations guide in [server/README.md](server/README.md) documents
+the Render configuration and the separate self-hosted Docker Compose
+deployment, including production secrets, TLS, and preflight checks.
 
 Before a production release:
 
-1. Verify `https://secure-print-1.onrender.com/healthz` returns a healthy
-   response.
-2. If using the self-hosted Compose deployment, configure DNS for
-   `api.privprint.com` and provision/verify its TLS certificate.
-3. Set production-only secrets using the deployment secret store; never reuse
-   local development values.
-4. Run `server/deploy/preflight-production.sh` from an appropriately configured
-   deployment host.
-5. Deploy the backend and clients using the same API URL, then check
-   the selected API's `/healthz` endpoint and relevant end-to-end flows.
+1. Verify the production API health endpoint and confirm the active database,
+   Redis, and object-storage configuration.
+2. Keep production secrets in the platform's secret store; never reuse local
+   development credentials.
+3. Confirm that the Android and Windows clients target the intended backend.
+4. Exercise sign-in, shop/station pairing, encrypted upload and retrieval,
+   printing, status updates, and cleanup on the target deployment.
+5. Review retention, backup, access-control, and physical-print handling
+   policies for the deployment.
 
 ## Troubleshooting
 
 | Symptom | Checks |
 | --- | --- |
-| API health check fails | Check `docker compose -f server\docker-compose.yml ps` and `logs api db redis`; confirm `.env.development` exists and the required containers are healthy. |
-| Android app cannot reach a local API | Use `10.0.2.2` from the emulator or the development computer's LAN IP from a phone; check firewall, Wi-Fi, and Android network-security settings. |
-| Windows station is not connected | Confirm the desktop app is signed in to the correct shop, the station is connected, the API URL is reachable, and the Windows worker is running. |
-| Station receives a job but cannot print | Verify the printer is installed and online in Windows, check the selected printer and driver, and inspect station/backend logs without sharing credentials. |
-| Production API is unavailable | Verify DNS, TLS certificate validity, reverse-proxy health, backend `/healthz`, and configured environment values. |
+| Local API is unhealthy | Run `docker compose -f server\docker-compose.yml ps`; inspect API, database, and Redis health, and check that `server\.env.development` exists. |
+| Android emulator cannot reach the local API | Use `10.0.2.2:8080`, not the emulator's own `localhost`; check that the API container is healthy. |
+| Physical phone cannot reach the local API | Use the development computer's LAN IP, confirm both devices can reach one another, and check firewall and Android network-security settings. |
+| Windows station cannot connect | Confirm internet access, the configured API is healthy, the operator is signed in to the intended shop, and the station is connected. |
+| Windows station cannot print | Check the installed printer and driver, Windows printer status, the selected/default printer, and the job's failure reason. |
+| Production service fails at startup | Review the deployment logs and verify production settings for database, Redis, secrets, HTTPS object storage, and debug mode. Do not disable production validation to hide a missing dependency. |
+
+Do not include passwords, API keys, access tokens, private keys, document data,
+or unredacted environment files in issue reports or logs.
+
+## Roadmap direction
+
+PrivPrint is actively developed. Near-term engineering focus is on reliable
+Android-to-station job delivery, consistent client/API behavior, production
+deployment hardening, and automated coverage of the full print lifecycle.
+These are development priorities, not release dates or guarantees.
 
 ## Contributing
 
-1. Create a focused branch for the change.
-2. Keep changes scoped and add or update tests for behavior changes.
-3. Run the relevant client/backend tests and builds before opening a pull
-   request.
-4. Never commit secrets, personal documents, generated installers, APKs, or
-   local environment files.
-5. Describe user-visible changes, validation performed, and any operational
-   prerequisites in the pull request.
+1. Check the existing issues and discussions before starting a large change.
+2. Keep changes focused and update the relevant component documentation.
+3. Add or update tests for behavior changes.
+4. Run the relevant build and tests from [Build and test](#build-and-test).
+5. Do not commit secrets, real customer documents, credentials, or generated
+   production artifacts.
+
+## Security reporting
+
+Please avoid posting exploitable vulnerability details or user data in public
+issues. Use the repository's GitHub Security tab for private vulnerability
+reporting where available.
 
 ## License
 
-No license file is currently included in this repository. Unless the
-maintainers add a license, do not assume the source is available for reuse,
-redistribution, or commercial use.
+No `LICENSE` file is present in the repository. No open-source license is
+declared here; contact the maintainers for licensing information.
