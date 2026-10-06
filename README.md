@@ -267,7 +267,7 @@ or put credentials, API keys, access tokens, or private keys in issue reports.
   station actions.
 - Print-job copy limits and state transitions are enforced by the backend.
 - Development settings are not production settings. Production requires
-  non-default secrets, authenticated infrastructure, disabled development OTP,
+  non-default secrets and authenticated infrastructure,
   TLS, and production object storage.
 
 These controls do not replace a security audit or guarantee that every

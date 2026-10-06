@@ -174,14 +174,6 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
     private val _authLoginError = MutableStateFlow<String?>(null)
     val authLoginError: StateFlow<String?> = _authLoginError.asStateFlow()
 
-    private val _userOtpRequested = MutableStateFlow(false)
-    val userOtpRequested: StateFlow<Boolean> = _userOtpRequested.asStateFlow()
-
-    private val _developmentOtp = MutableStateFlow<String?>(null)
-    val developmentOtp: StateFlow<String?> = _developmentOtp.asStateFlow()
-
-    private var pendingUserName: String = ""
-    private var pendingUserPhone: String = ""
 
     private val _currentMode = MutableStateFlow(
         if (savedAuthState == AuthState.SHOP_LOGGED_IN) AppMode.SHOP else AppMode.USER
@@ -493,85 +485,6 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
             }
         }
         return true
-    }
-
-    fun requestUserOtp(name: String, phoneNumber: String): Boolean {
-        val trimmedName = name.trim()
-        val trimmedPhone = phoneNumber.trim()
-        if (_authLoginInProgress.value) {
-            return true
-        }
-        if (trimmedName.isBlank() || trimmedPhone.isBlank()) {
-            return false
-        }
-
-        _authLoginError.value = null
-        _authLoginInProgress.value = true
-        pendingUserName = trimmedName
-        pendingUserPhone = trimmedPhone
-        viewModelScope.launch {
-            when (val result = repository.requestPhoneOtp(trimmedPhone)) {
-                is com.example.privprint.data.repository.PrivPrintRepository.OtpRequestResult.Sent -> {
-                    _authLoginInProgress.value = false
-                    _userOtpRequested.value = true
-                    _developmentOtp.value = result.response.developmentOtp
-                }
-                is com.example.privprint.data.repository.PrivPrintRepository.OtpRequestResult.Failure -> {
-                    _authLoginInProgress.value = false
-                    _authLoginError.value = "Could not send verification code: ${result.error}"
-                }
-            }
-        }
-        return true
-    }
-
-    fun verifyUserOtp(otp: String): Boolean {
-        val code = otp.trim()
-        if (_authLoginInProgress.value) return true
-        if (code.length != 6 || !code.all { it.isDigit() }) {
-            _authLoginError.value = "Enter the 6-digit verification code."
-            return false
-        }
-
-        _authLoginError.value = null
-        _authLoginInProgress.value = true
-        viewModelScope.launch {
-            when (val result = repository.verifyPhoneOtp(pendingUserPhone, code)) {
-                is com.example.privprint.data.auth.AuthResult.Success -> {
-                    _authLoginInProgress.value = false
-                    _userOtpRequested.value = false
-                    _developmentOtp.value = null
-                    _currentUser.value = AuthUser(
-                        name = pendingUserName,
-                        phoneNumber = pendingUserPhone
-                    )
-                    _pendingLoginRole.value = null
-                    _authState.value = AuthState.USER_LOGGED_IN
-                    _currentMode.value = AppMode.USER
-                    _userUiState.value = _userUiState.value.copy(
-                        currentScreen = UserScreen.HOME,
-                        toastMessage = "Welcome, $pendingUserName! Secure session started."
-                    )
-                    prefs.edit()
-                        .putString("auth_state", AuthState.USER_LOGGED_IN.name)
-                        .putString("user_name", pendingUserName)
-                        .putString("user_phone", pendingUserPhone)
-                        .apply()
-                }
-                is com.example.privprint.data.auth.AuthResult.Failure -> {
-                    _authLoginInProgress.value = false
-                    _authLoginError.value = "Verification failed: ${result.error}"
-                }
-            }
-        }
-        return true
-    }
-
-    fun resetUserOtp() {
-        if (_authLoginInProgress.value) return
-        _userOtpRequested.value = false
-        _developmentOtp.value = null
-        _authLoginError.value = null
     }
 
     fun savePrinter(

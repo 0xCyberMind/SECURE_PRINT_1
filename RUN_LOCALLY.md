@@ -1,7 +1,7 @@
 # Run PrivPrint 100% Free on Your Laptop (and give it a Public URL)
 
 This guide runs the **entire PrivPrint platform for free**: API, PostgreSQL, Redis,
-object storage, cleanup worker, real phone-OTP login, and — optionally — a public
+object storage, cleanup worker, email/password login, and — optionally — a public
 HTTPS URL so **any user on any network** (mobile data included) can use the app.
 
 Nothing here requires a paid cloud service.
@@ -26,7 +26,7 @@ What it starts (from [server/docker-compose.yml](server/docker-compose.yml)):
 | FastAPI | privprint-api-dev | **8080** | The `/api/v1` backend |
 | Cleanup worker | privprint-worker-dev | — | Verified document shredding sweep |
 | PostgreSQL 15 | privprint-db-dev | 5432 | Real database (all business data) |
-| Redis 7 | privprint-redis-dev | 6379 | Rate limits, realtime pub/sub, OTP store |
+| Redis 7 | privprint-redis-dev | 6379 | Rate limits and realtime pub/sub |
 | MinIO | privprint-minio-dev | 9000/9001 | S3-compatible ciphertext storage |
 
 Config lives in [server/.env.development](server/.env.development) (gitignored).
@@ -46,25 +46,11 @@ docker compose -f server\docker-compose.yml down -v       # stop AND wipe data
 
 ---
 
-## 2. Free real login (OTP)
+## 2. Email/password login
 
-With `ENVIRONMENT=development` and no Twilio keys, the server issues its own OTP:
-
-- **Phone number:** any (e.g. `+919876543210`)
-- **OTP:** `123456`
-- Customer login → role `USER`; operator login → role `SHOP_OPERATOR`
-  (the operator's shop is auto-created on first login)
-
-This is governed by `DEVELOPMENT_OTP_ENABLED=true` in
-[server/.env.development](server/.env.development).
-
-> **Security:** the fixed `123456` OTP is only safe while the server is private
-> (your laptop / LAN). Before exposing it publicly (section 4), switch to real
-> SMS: create a [Twilio Verify](https://www.twilio.com/docs/verify) service and
-> fill `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`
-> in `.env.development`, **and set `DEVELOPMENT_OTP_ENABLED=false`**.
-> Twilio then takes over transparently — no code changes. (India requires DLT
-> registration for A2P SMS; the free-tier alternative is Firebase Phone Auth.)
+Customer and shop-operator accounts sign in using the email and password
+entered during account registration. Phone OTP and Twilio Verify are not part
+of the current authentication flow.
 
 ---
 
@@ -88,7 +74,7 @@ This is governed by `DEVELOPMENT_OTP_ENABLED=true` in
    ```
 3. In the app: **Settings → API Environment** can also switch endpoints at runtime.
 
-Then: login with OTP → scan QR (or tap a nearby shop) → pick a document →
+Then: sign in with email/password → scan QR (or tap a nearby shop) → pick a document →
 print. The job, copy limits, and cleanup are enforced by the real server.
 
 ---
@@ -131,7 +117,7 @@ VM and run the production stack — your laptop stops being a server entirely:
 ```bash
 # on the VPS
 git clone <your-repo> && cd privprint/server
-cp .env.example .env.production   # fill secrets, Twilio keys, strong SECRET_KEY
+cp .env.example .env.production   # fill secrets and a strong SECRET_KEY
 docker compose -f docker-compose.prod.yml up -d
 ```
 
@@ -140,7 +126,6 @@ provide TLS, security headers, WSS, and rate limiting. Zero code changes.
 
 ### Reminder before going public
 
-- `DEVELOPMENT_OTP_ENABLED=false` + real Twilio credentials (section 2).
 - `SECRET_KEY` regenerated (never reuse the committed dev key).
 - Postgres/Redis/MinIO stay **unexposed** — only the API goes through the tunnel.
 
@@ -170,6 +155,5 @@ python -m pytest windows_agent/tests/ -v      # 11 agent tests
 |---|---|
 | `healthz` unreachable | `docker compose -f server\docker-compose.yml logs api` |
 | Phone can't reach laptop | Phone on same Wi-Fi; laptop IP in debug `network_security_config.xml`; Windows Firewall allow port 8080 for private networks |
-| Login says "OTP service is unavailable" | Redis container down: `docker compose -f server\docker-compose.yml up -d redis` |
+| Login or rate limit fails | Redis container down: `docker compose -f server\docker-compose.yml up -d redis` |
 | App shows local-only (offline) behavior | App is in a fallback mode — check the API base URL and that the phone can open `/healthz` |
-| OTP rejected in production | `DEVELOPMENT_OTP_ENABLED=false` without Twilio keys → OTP login disabled by design |

@@ -122,11 +122,11 @@ def test_production_compose_and_preflight_enforce_secrets_and_tls():
         compose = f.read()
     assert "ENVIRONMENT: production" in compose
     assert 'DEBUG: "false"' in compose
-    assert 'DEVELOPMENT_OTP_ENABLED: "false"' in compose
     assert "${SECRET_KEY:?" in compose
     assert "${POSTGRES_PASSWORD:?" in compose
     assert "${REDIS_PASSWORD:?" in compose
-    assert "${TWILIO_VERIFY_SERVICE_SID:?" in compose
+    assert "TWILIO_" not in compose
+    assert "DEVELOPMENT_OTP_ENABLED" not in compose
 
     with open(os.path.join(server_dir, "deploy", "preflight-production.sh"), encoding="utf-8") as f:
         preflight = f.read()
@@ -140,7 +140,7 @@ def test_production_compose_and_preflight_enforce_secrets_and_tls():
         production_env_template = f.read()
     assert "POSTGRES_PASSWORD=" in production_env_template
     assert "REDIS_PASSWORD=" in production_env_template
-    assert "TWILIO_AUTH_TOKEN=" in production_env_template
+    assert "TWILIO_" not in production_env_template
     assert "STORAGE_ENDPOINT=https://" in production_env_template
 
 

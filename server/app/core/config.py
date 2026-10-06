@@ -56,18 +56,6 @@ class Settings(BaseSettings):
     REDIS_ENABLED: bool = True
     REDIS_SOCKET_TIMEOUT: float = 2.0
 
-    # Development OTP backdoor (fixed code 123456).
-    # NEVER enable on a publicly reachable deployment: anyone could log in as any phone number.
-    DEVELOPMENT_OTP_ENABLED: bool = Field(
-        default_factory=lambda data: data.get("ENVIRONMENT") != EnvironmentType.PRODUCTION,
-        description="Enable the fixed development OTP only outside production",
-    )
-
-    # Twilio Verify (credentials are supplied by the deployment secret store)
-    TWILIO_ACCOUNT_SID: str = ""
-    TWILIO_AUTH_TOKEN: str = ""
-    TWILIO_VERIFY_SERVICE_SID: str = ""
-
     # Rate Limiting (Configurable windows and limits)
     RATE_LIMIT_LOGIN_MAX: int = 5
     RATE_LIMIT_LOGIN_WINDOW_SECONDS: int = 60
@@ -142,9 +130,6 @@ class Settings(BaseSettings):
             problems.append("SECRET_KEY must not be the example placeholder")
         if self.DEBUG:
             problems.append("DEBUG must be false")
-        if self.DEVELOPMENT_OTP_ENABLED:
-            problems.append("DEVELOPMENT_OTP_ENABLED must be false")
-
         database = urlsplit(self.DATABASE_URL)
         if (
             database.scheme != "postgresql+asyncpg"
@@ -187,20 +172,6 @@ class Settings(BaseSettings):
             or self.STORAGE_SECRET_KEY.upper().startswith("REPLACE_WITH")
         ):
             problems.append("STORAGE_SECRET_KEY must be set to a non-default value")
-
-        if not all((
-            self.TWILIO_ACCOUNT_SID,
-            self.TWILIO_AUTH_TOKEN,
-            self.TWILIO_VERIFY_SERVICE_SID,
-        )) or any(
-            value.upper().startswith(("AC_REPLACE", "VA_REPLACE", "REPLACE_WITH"))
-            for value in (
-                self.TWILIO_ACCOUNT_SID,
-                self.TWILIO_AUTH_TOKEN,
-                self.TWILIO_VERIFY_SERVICE_SID,
-            )
-        ):
-            problems.append("all Twilio Verify credentials must be set")
 
         if problems:
             raise ValueError("Invalid production configuration: " + "; ".join(problems))

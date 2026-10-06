@@ -14,9 +14,6 @@ import com.example.privprint.data.api.models.LoginRequest
 import com.example.privprint.data.api.models.LoginResponse
 import com.example.privprint.data.api.models.RegisterRequest
 import com.example.privprint.data.api.models.NearbyShopDto
-import com.example.privprint.data.api.models.OtpRequestResponse
-import com.example.privprint.data.api.models.PhoneOtpRequest
-import com.example.privprint.data.api.models.PhoneOtpVerifyRequest
 import com.example.privprint.data.api.models.PermanentQrResponse
 import com.example.privprint.data.api.models.PrinterDto
 import com.example.privprint.data.api.models.RefreshTokenRequest
@@ -57,16 +54,6 @@ interface PrivPrintApiService {
     suspend fun register(
         @Body request: RegisterRequest
     ): Response<LoginResponse>
-
-    @POST("api/v1/auth/phone/request-otp")
-    suspend fun requestPhoneOtp(
-        @Body request: PhoneOtpRequest
-    ): Response<OtpRequestResponse>
-
-    @POST("api/v1/auth/phone/verify-otp")
-    suspend fun verifyPhoneOtp(
-        @Body request: PhoneOtpVerifyRequest
-    ): Response<TokenResponse>
 
     @POST("api/v1/auth/refresh")
     suspend fun refreshToken(

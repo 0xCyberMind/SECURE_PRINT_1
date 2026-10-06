@@ -130,7 +130,7 @@ fun ShopDashboardScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "${maskedPhoneNumber(currentShopAuth.operatorPhone)} • OTP Verified",
+                                text = maskedPhoneNumber(currentShopAuth.operatorPhone),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

@@ -38,6 +38,20 @@ def test_register_and_valid_login(client: TestClient):
     assert login_data["user"]["email"] == "auth_test_user@example.com"
 
 
+def test_phone_otp_endpoints_are_removed(client: TestClient):
+    request_response = client.post(
+        "/api/v1/auth/phone/request-otp",
+        json={"phone_number": "+1234567890", "role": "USER"},
+    )
+    verify_response = client.post(
+        "/api/v1/auth/phone/verify-otp",
+        json={"phone_number": "+1234567890", "otp": "123456", "role": "USER"},
+    )
+
+    assert request_response.status_code == 404
+    assert verify_response.status_code == 404
+
+
 def test_invalid_password_rejection(client: TestClient):
     # Register user first
     client.post("/api/v1/auth/register", json={

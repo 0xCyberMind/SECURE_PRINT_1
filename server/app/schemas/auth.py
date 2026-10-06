@@ -17,25 +17,6 @@ class UserLoginRequest(BaseModel):
     password: str
 
 
-class PhoneOtpRequest(BaseModel):
-    phone_number: str = Field(..., min_length=7, max_length=32)
-    role: UserRole = UserRole.USER
-    shop_id: Optional[str] = None
-
-
-class PhoneOtpVerifyRequest(BaseModel):
-    phone_number: str = Field(..., min_length=7, max_length=32)
-    otp: str = Field(..., min_length=6, max_length=6)
-    role: UserRole = UserRole.USER
-    shop_id: Optional[str] = None
-
-
-class OtpRequestResponse(BaseModel):
-    message: str
-    expires_in: int
-    development_otp: Optional[str] = None
-
-
 class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

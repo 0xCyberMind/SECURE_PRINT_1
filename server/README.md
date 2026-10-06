@@ -34,14 +34,12 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 pytest tests/ -v
 ```
 
-## Phone OTP configuration
+## Authentication
 
-Local development uses the fixed OTP `123456` only when Twilio Verify is not
-configured. For staging or production, create a Twilio Verify Service and set
-`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_VERIFY_SERVICE_SID` in
-the deployment platform's secret/environment settings. Do not commit these
-values or put them in source control. Phone numbers sent to Twilio must include
-their country code (E.164 format, for example `+919876543210`).
+Customer and shop-operator accounts use email and password authentication.
+Phone OTP endpoints and Twilio Verify integration have been removed. Customer
+accounts created only through the former OTP flow need an email/password
+account before they can sign in with the current clients.
 
 ## Render deployment (current production target)
 
@@ -66,13 +64,9 @@ not paste credentials into source control. The URL must include a password.
 The application intentionally refuses to start in production without it
 because the production rate limiter and realtime features depend on Redis.
 
-Set `ENVIRONMENT=production` and `DEBUG=false`. The development OTP flag now
-defaults to disabled automatically in production; if set explicitly, it must
-be `false`. Keep `SECRET_KEY`, `DATABASE_URL`, all three Twilio Verify
-credentials, and HTTPS object-storage credentials configured in Render's
+Set `ENVIRONMENT=production` and `DEBUG=false`. Keep `SECRET_KEY`,
+`DATABASE_URL`, and HTTPS object-storage credentials configured in Render's
 environment/secrets. If startup logs report
-`DEVELOPMENT_OTP_ENABLED must be false`, set that variable to `false` on the
-service and redeploy. If they report
 `REDIS_URL must target a remote Redis service with authentication`, attach or
 provision an authenticated Redis service, then set `REDIS_URL` to its
 credential-bearing private connection URL and redeploy. Do not disable the
@@ -89,9 +83,9 @@ openssl rand -hex 32
 
 Replace every placeholder in `.env.production` with values from the deployment
 secret store. Use separate generated hexadecimal values for
-`POSTGRES_PASSWORD`, `REDIS_PASSWORD`, and `SECRET_KEY`; configure real Twilio
-Verify credentials and non-default object-storage credentials with an HTTPS
-storage endpoint. Do not commit or paste the populated file into support logs.
+`POSTGRES_PASSWORD`, `REDIS_PASSWORD`, and `SECRET_KEY`; configure non-default
+object-storage credentials with an HTTPS storage endpoint. Do not commit or
+paste the populated file into support logs.
 The Compose interpolation values must be supplied to Compose itself; the
 service-level `env_file` alone does not supply `${...}` substitutions. The
 commands below use `--env-file` for that reason:
@@ -108,7 +102,7 @@ certificate hostname, expiry and public/private-key match; validates required
 Compose substitutions; loads the API's production settings in a one-off
 container; and runs `nginx -t`. It does not start or modify the services.
 Production startup fails fast if the signing key, database/Redis credentials,
-TLS storage settings, Twilio values, debug mode, or development OTP settings
+TLS storage settings or debug mode
 are unsafe or incomplete.
 
 For renewal, configure the host's Certbot timer to run this script as root.

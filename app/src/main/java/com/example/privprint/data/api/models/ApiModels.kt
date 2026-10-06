@@ -84,25 +84,6 @@ data class ApiUser(
     val role: UserRole
 )
 
-data class PhoneOtpRequest(
-    @Json(name = "phone_number") val phoneNumber: String,
-    val role: UserRole = UserRole.USER,
-    @Json(name = "shop_id") val shopId: String? = null
-)
-
-data class PhoneOtpVerifyRequest(
-    @Json(name = "phone_number") val phoneNumber: String,
-    val otp: String,
-    val role: UserRole = UserRole.USER,
-    @Json(name = "shop_id") val shopId: String? = null
-)
-
-data class OtpRequestResponse(
-    val message: String,
-    @Json(name = "expires_in") val expiresIn: Int,
-    @Json(name = "development_otp") val developmentOtp: String?
-)
-
 data class TokenResponse(
     @Json(name = "access_token") val accessToken: String,
     @Json(name = "refresh_token") val refreshToken: String,

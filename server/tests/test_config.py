@@ -40,7 +40,6 @@ def _valid_production_settings():
         "_env_file": None,
         "ENVIRONMENT": "production",
         "DEBUG": False,
-        "DEVELOPMENT_OTP_ENABLED": False,
         "SECRET_KEY": "a" * 64,
         "DATABASE_URL": "postgresql+asyncpg://privprint:dbpass@db.example.com/privprint",
         "REDIS_URL": "rediss://:redispass@redis.example.com:6380/0",
@@ -48,24 +47,12 @@ def _valid_production_settings():
         "STORAGE_USE_SSL": True,
         "STORAGE_ACCESS_KEY": "production-storage-user",
         "STORAGE_SECRET_KEY": "production-storage-secret",
-        "TWILIO_ACCOUNT_SID": "AC-test",
-        "TWILIO_AUTH_TOKEN": "twilio-test-token",
-        "TWILIO_VERIFY_SERVICE_SID": "VA-test",
     }
 
 
 def test_production_configuration_accepts_secure_remote_dependencies():
     settings = Settings(**_valid_production_settings())
     assert settings.ENVIRONMENT == EnvironmentType.PRODUCTION
-
-
-def test_production_defaults_development_otp_to_disabled():
-    values = _valid_production_settings()
-    del values["DEVELOPMENT_OTP_ENABLED"]
-
-    settings = Settings(**values)
-
-    assert settings.DEVELOPMENT_OTP_ENABLED is False
 
 
 @pytest.mark.parametrize(
@@ -85,12 +72,10 @@ def test_database_provider_urls_use_asyncpg_driver(database_url):
     [
         {"SECRET_KEY": "REPLACE_WITH_A_SECRET"},
         {"DEBUG": True},
-        {"DEVELOPMENT_OTP_ENABLED": True},
         {"DATABASE_URL": "postgresql+asyncpg://privprint:password@localhost/privprint"},
         {"REDIS_URL": "redis://localhost:6379/0"},
         {"STORAGE_ENDPOINT": "http://storage.example.com"},
         {"STORAGE_USE_SSL": False},
-        {"TWILIO_AUTH_TOKEN": ""},
     ],
 )
 def test_production_configuration_rejects_unsafe_values(override):

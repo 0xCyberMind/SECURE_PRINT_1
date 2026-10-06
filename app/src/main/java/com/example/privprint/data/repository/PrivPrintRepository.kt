@@ -9,9 +9,6 @@ import com.example.privprint.data.api.models.InitUploadRequest
 import com.example.privprint.data.api.models.LoginRequest
 import com.example.privprint.data.api.models.RegisterRequest
 import com.example.privprint.data.api.models.ShopCreateRequest
-import com.example.privprint.data.api.models.PhoneOtpRequest
-import com.example.privprint.data.api.models.PhoneOtpVerifyRequest
-import com.example.privprint.data.api.models.OtpRequestResponse
 import com.example.privprint.data.api.models.NearbyShopDto
 import com.example.privprint.data.api.models.StationPrintKeyDto
 import com.example.privprint.data.api.models.UserRole
@@ -92,67 +89,6 @@ class PrivPrintRepository(
         ApiClient.init(authTokenManager)
     }
 
-    suspend fun requestPhoneOtp(
-        phoneNumber: String,
-        role: UserRole = UserRole.USER,
-        shopId: String? = null
-    ): OtpRequestResult {
-        return try {
-            val response = ApiClient.apiService.requestPhoneOtp(
-                PhoneOtpRequest(phoneNumber, role, shopId)
-            )
-            if (!response.isSuccessful || response.body() == null) {
-                val errorBody = response.errorBody()?.string()
-                OtpRequestResult.Failure(
-                    apiErrorMessage(errorBody, "OTP request failed")
-                )
-            } else {
-                OtpRequestResult.Sent(response.body()!!)
-            }
-        } catch (e: Exception) {
-            OtpRequestResult.Failure(e.message ?: "Network error")
-        }
-    }
-
-    suspend fun verifyPhoneOtp(
-        phoneNumber: String,
-        otp: String,
-        role: UserRole = UserRole.USER,
-        shopId: String? = null
-    ): AuthResult {
-        return try {
-            val response = ApiClient.apiService.verifyPhoneOtp(
-                PhoneOtpVerifyRequest(phoneNumber, otp, role, shopId)
-            )
-            if (!response.isSuccessful || response.body() == null) {
-                val errorBody = response.errorBody()?.string()
-                return AuthResult.Failure(
-                    apiErrorMessage(errorBody, "OTP verification failed"),
-                    if (response.code() == 409) {
-                        "CONFLICT"
-                    } else {
-                        apiErrorCode(errorBody) ?: "OTP_VERIFY_FAILED"
-                    }
-                )
-            }
-
-            val body = response.body()!!
-            val user = AuthenticatedUser(
-                body.user.id,
-                body.user.role,
-                shopId,
-                fullName = body.user.fullName,
-                email = body.user.email,
-                phoneNumber = body.user.phoneNumber
-            )
-            authTokenManager.saveAuth(user, body.accessToken, body.refreshToken)
-            realtimeClient.connect("user:${body.user.id}", body.accessToken)
-            AuthResult.Success(user, body.accessToken, body.refreshToken)
-        } catch (e: Exception) {
-            AuthResult.Failure(e.message ?: "Network error", "NETWORK_ERROR")
-        }
-    }
-
     private fun apiErrorMessage(body: String?, fallback: String): String {
         if (body.isNullOrBlank()) return fallback
         val message = runCatching {
@@ -172,25 +108,6 @@ class PrivPrintRepository(
                 ?.optString("code")
                 ?.takeIf { it.isNotBlank() }
         }.getOrNull()
-    }
-
-    suspend fun loginWithPhoneOtp(
-        phoneNumber: String,
-        role: UserRole = UserRole.USER,
-        shopId: String? = null
-    ): AuthResult {
-        return when (val request = requestPhoneOtp(phoneNumber, role, shopId)) {
-            is OtpRequestResult.Failure ->
-                AuthResult.Failure(request.error, "OTP_REQUEST_FAILED")
-            is OtpRequestResult.Sent -> {
-                val code = request.response.developmentOtp
-                    ?: return AuthResult.Failure(
-                        "Enter the verification code sent to your phone",
-                        "OTP_REQUIRED"
-                    )
-                verifyPhoneOtp(phoneNumber, code, role, shopId)
-            }
-        }
     }
 
     // Active session state flow
@@ -225,11 +142,6 @@ class PrivPrintRepository(
                 severity = "INFO"
             )
         )
-    }
-
-    sealed class OtpRequestResult {
-        data class Sent(val response: OtpRequestResponse) : OtpRequestResult()
-        data class Failure(val error: String) : OtpRequestResult()
     }
 
     suspend fun savePrinter(printer: Printer) {
