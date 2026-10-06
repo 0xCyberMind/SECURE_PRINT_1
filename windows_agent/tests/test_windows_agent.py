@@ -44,14 +44,26 @@ def test_config_load_and_save(tmp_path):
 
 def test_station_config_defaults_to_render_without_assuming_shop():
     config = AgentConfig()
-    assert config.server_base_url == "https://api.privprint.com/"
+    assert config.server_base_url == "https://secure-print-1.onrender.com/"
     assert config.shop_id == ""
+
+
+def test_station_config_migrates_previous_production_default(tmp_path):
+    config_path = tmp_path / "shop_station_config.json"
+    config_path.write_text(
+        json.dumps({"server_base_url": "https://api.privprint.com/"}),
+        encoding="utf-8",
+    )
+
+    config = AgentConfig.load(str(config_path))
+
+    assert config.server_base_url == "https://secure-print-1.onrender.com/"
 
 
 def test_realtime_url_never_puts_access_token_in_query():
     config = AgentConfig(access_token="test-access-token")
     client = WindowsAgentRealtimeClient(config)
-    assert client._get_ws_url() == "wss://api.privprint.com/api/v1/realtime/ws"
+    assert client._get_ws_url() == "wss://secure-print-1.onrender.com/api/v1/realtime/ws"
     assert "test-access-token" not in client._get_ws_url()
 
 

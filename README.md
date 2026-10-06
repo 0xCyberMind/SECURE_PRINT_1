@@ -8,8 +8,9 @@ printers, and a backend coordinates authentication, sessions, jobs, and delivery
 The Android and Windows clients use the same versioned API.
 
 > **Status:** This repository is under active development. The production API
-> URL configured in the clients is `https://api.privprint.com/`; verify DNS,
-> TLS, service health, and deployment readiness before distributing a release.
+> Render API URL configured in the clients is
+> `https://secure-print-1.onrender.com/`. The optional self-hosted Compose
+> gateway uses `api.privprint.com`, which requires its own DNS and TLS setup.
 
 [![Android](https://img.shields.io/badge/Android-Kotlin%20%7C%20Compose-3DDC84?logo=android&logoColor=white)](https://developer.android.com)
 [![Backend](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -233,8 +234,9 @@ be contacted by unit tests.
 
 ### API endpoints
 
-The canonical production API URL configured for client builds is
-`https://api.privprint.com/`.
+The current Render API URL configured for client builds is
+`https://secure-print-1.onrender.com/`. `https://api.privprint.com/` is only
+usable after its DNS and TLS are configured to route to a running backend.
 
 - Android production/debug defaults are defined in `app/build.gradle.kts`.
   Override the debug endpoint with the `DEBUG_API_BASE_URL` Gradle property.
@@ -285,14 +287,16 @@ stack.
 
 Before a production release:
 
-1. Verify `api.privprint.com` resolves to the intended production ingress.
-2. Provision and verify a TLS certificate for the canonical API hostname.
+1. Verify `https://secure-print-1.onrender.com/healthz` returns a healthy
+   response.
+2. If using the self-hosted Compose deployment, configure DNS for
+   `api.privprint.com` and provision/verify its TLS certificate.
 3. Set production-only secrets using the deployment secret store; never reuse
    local development values.
 4. Run `server/deploy/preflight-production.sh` from an appropriately configured
    deployment host.
 5. Deploy the backend and clients using the same API URL, then check
-   `https://api.privprint.com/healthz` and relevant end-to-end flows.
+   the selected API's `/healthz` endpoint and relevant end-to-end flows.
 
 ## Troubleshooting
 

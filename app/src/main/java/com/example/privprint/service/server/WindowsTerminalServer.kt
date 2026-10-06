@@ -1080,7 +1080,7 @@ class WindowsTerminalServer(
                         <div style="display:flex; flex-direction:column; gap:16px; max-width:600px;">
                             <div>
                                 <label style="font-size:13px; font-weight:600; color:var(--text-muted);">Cloud API Endpoint</label>
-                                <input type="text" class="form-control" value="https://api.privprint.com" readonly>
+                                <input type="text" class="form-control" value="https://secure-print-1.onrender.com" readonly>
                             </div>
                             <div>
                                 <label style="font-size:13px; font-weight:600; color:var(--text-muted);">Local Station URL</label>

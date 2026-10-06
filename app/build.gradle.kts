@@ -47,13 +47,13 @@ android {
       buildConfigField(
         "String",
         "API_BASE_URL",
-        "\"${providers.gradleProperty("RELEASE_API_BASE_URL").orElse("https://api.privprint.com/").get()}\""
+        "\"${providers.gradleProperty("RELEASE_API_BASE_URL").orElse("https://secure-print-1.onrender.com/").get()}\""
       )
     }
     debug {
       signingConfig = signingConfigs.getByName("debugConfig")
       val debugApiUrl = providers.gradleProperty("DEBUG_API_BASE_URL")
-        .orElse("https://api.privprint.com/")
+        .orElse("https://secure-print-1.onrender.com/")
       buildConfigField("String", "API_BASE_URL", "\"${debugApiUrl.get()}\"")
     }
   }

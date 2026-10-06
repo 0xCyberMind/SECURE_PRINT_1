@@ -68,7 +68,7 @@ def test_private_object_storage_readiness():
 
 def test_android_and_windows_production_endpoints():
     """
-    Verify Android Client and Windows Agent production endpoints point to https://api.privprint.com/
+    Verify Android Client and Windows Agent production endpoints use the live Render service URL
     and never use development credentials in production mode.
     """
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -78,11 +78,11 @@ def test_android_and_windows_production_endpoints():
     assert os.path.exists(android_api_client_path)
     with open(android_api_client_path, "r", encoding="utf-8") as f:
         content = f.read()
-        assert 'const val PROD_BASE_URL = "https://api.privprint.com/"' in content
+        assert 'const val PROD_BASE_URL = "https://secure-print-1.onrender.com/"' in content
 
     with open(os.path.join(repo_root, "app", "build.gradle.kts"), encoding="utf-8") as f:
         gradle_content = f.read()
-    assert 'orElse("https://api.privprint.com/")' in gradle_content
+    assert 'orElse("https://secure-print-1.onrender.com/")' in gradle_content
 
     with open(
         os.path.join(
@@ -101,9 +101,9 @@ def test_android_and_windows_production_endpoints():
         ),
         encoding="utf-8",
     ) as f:
-        assert 'PRODUCTION("Production Cloud (HTTPS)", "https://api.privprint.com/")' in f.read()
+        assert 'PRODUCTION("Production Cloud (HTTPS)", "https://secure-print-1.onrender.com/")' in f.read()
 
-    assert WIN_PROD_URL == "https://api.privprint.com/"
+    assert WIN_PROD_URL == "https://secure-print-1.onrender.com/"
     assert WIN_DEV_URL != WIN_PROD_URL
 
     with open(os.path.join(repo_root, "server", "deploy", "nginx.conf"), encoding="utf-8") as f:
@@ -111,7 +111,9 @@ def test_android_and_windows_production_endpoints():
     assert nginx_content.count("server_name api.privprint.com;") == 2
 
     with open(os.path.join(repo_root, "server", ".env.example"), encoding="utf-8") as f:
-        assert "https://api.privprint.com" in f.read()
+        cors_origins = f.read()
+        assert "https://secure-print-1.onrender.com" in cors_origins
+        assert "https://api.privprint.com" in cors_origins
 
 
 def test_production_compose_and_preflight_enforce_secrets_and_tls():

@@ -98,6 +98,7 @@ class Settings(BaseSettings):
     CORS_ORIGINS: Union[List[str], str] = [
         "http://localhost:3000",
         "http://localhost:8888",
+        "https://secure-print-1.onrender.com",
         "https://api.privprint.com"
     ]
 

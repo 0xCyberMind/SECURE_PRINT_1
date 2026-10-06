@@ -18,7 +18,7 @@ def _config_directory() -> str:
 
 CONFIG_FILE_PATH = os.path.join(_config_directory(), "shop_station_config.json")
 
-PROD_SERVER_BASE_URL = "https://api.privprint.com/"
+PROD_SERVER_BASE_URL = "https://secure-print-1.onrender.com/"
 DEV_SERVER_BASE_URL = "https://ais-dev-6u62dc37mqabbjyehi6umo-408539472511.asia-southeast1.run.app/"
 
 @dataclass
@@ -42,6 +42,9 @@ class AgentConfig:
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     data = json.load(f)
+                    configured_url = data.get("server_base_url", "")
+                    if isinstance(configured_url, str) and configured_url.rstrip("/").lower() == "https://api.privprint.com":
+                        data["server_base_url"] = PROD_SERVER_BASE_URL
                     return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
             except Exception:
                 pass

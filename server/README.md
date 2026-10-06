@@ -43,14 +43,18 @@ the deployment platform's secret/environment settings. Do not commit these
 values or put them in source control. Phone numbers sent to Twilio must include
 their country code (E.164 format, for example `+919876543210`).
 
-## Production Compose deployment
+## Render deployment (current production target)
 
-The production clients and the Nginx gateway use **`https://api.privprint.com/`**
-as the single canonical API URL. Before releasing clients, point the `api`
-DNS record to the host running this Compose stack and verify that inbound ports
-80 and 443 reach that host. The custom domain and certificate are not verified
-by a local build; do not distribute a release pointing to this URL until the
-DNS record and `/healthz` probe succeed.
+The Android and Windows clients currently use
+**`https://secure-print-1.onrender.com/`**, the Render service URL. Before
+releasing clients, verify the service health endpoint at
+`https://secure-print-1.onrender.com/healthz`.
+
+`api.privprint.com` is a separate custom-domain/self-hosted Compose target.
+Do not switch clients to that hostname until its DNS points to the active
+backend and HTTPS `/healthz` responds successfully. The Compose Nginx and
+Certbot instructions below apply to a host you operate; they do not configure
+Render's custom-domain routing or certificates.
 
 Create a private production environment file from the placeholder-only sample:
 
@@ -77,7 +81,7 @@ docker compose --env-file .env.production -f docker-compose.prod.yml up -d --bui
 ```
 
 The certificate command uses Certbot's standalone HTTP challenge. Run it after
-DNS has propagated and while port 80 is available. The preflight checks the
+the self-hosted custom-domain DNS has propagated and while port 80 is available. The preflight checks the
 certificate hostname, expiry and public/private-key match; validates required
 Compose substitutions; loads the API's production settings in a one-off
 container; and runs `nginx -t`. It does not start or modify the services.

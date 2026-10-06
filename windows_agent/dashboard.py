@@ -257,7 +257,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <h4 style="margin-bottom: 20px;">Station Configuration</h4>
                     <div class="form-group">
                         <label>PrivPrint Server Base URL</label>
-                        <input type="text" id="s-server-url" value="https://api.privprint.com/" readonly>
+                        <input type="text" id="s-server-url" value="https://secure-print-1.onrender.com/" readonly>
                     </div>
                     <div class="form-group">
                         <label>Assigned Xerox Shop ID</label>
