@@ -20,12 +20,16 @@ debug.keystore
 # Keep backend secrets and generated artifacts out of source uploads.
 /server/.env.*
 !/server/.env.example
+!/server/.env.production.example
+/server/deploy/certs/*.pem
+/server/deploy/certs/*.key
 **/build/
 **/.pytest_cache/
 **/__pycache__/
 **/.env
 **/.env.*
 !**/.env.example
+!**/.env.production.example
 
 # Local credentials, test data, and diagnostic output.
 **/.secure_credentials.dat

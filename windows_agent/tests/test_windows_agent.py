@@ -44,14 +44,14 @@ def test_config_load_and_save(tmp_path):
 
 def test_station_config_defaults_to_render_without_assuming_shop():
     config = AgentConfig()
-    assert config.server_base_url == "https://secure-print-1.onrender.com/"
+    assert config.server_base_url == "https://api.privprint.com/"
     assert config.shop_id == ""
 
 
 def test_realtime_url_never_puts_access_token_in_query():
     config = AgentConfig(access_token="test-access-token")
     client = WindowsAgentRealtimeClient(config)
-    assert client._get_ws_url() == "wss://secure-print-1.onrender.com/api/v1/realtime/ws"
+    assert client._get_ws_url() == "wss://api.privprint.com/api/v1/realtime/ws"
     assert "test-access-token" not in client._get_ws_url()
 
 
@@ -132,6 +132,25 @@ def test_printer_spooler_discovery():
     assert "driver_name" in printer
     assert "connection_info" in printer
     assert "is_default" in printer
+
+
+def test_printer_ids_are_shop_scoped_and_legacy_ids_still_resolve():
+    first_shop_spooler = PrinterSpoolerManager(identity_namespace="SHOP-A")
+    second_shop_spooler = PrinterSpoolerManager(identity_namespace="SHOP-B")
+
+    first_id = first_shop_spooler._generate_stable_id("OneNote (Desktop)", "nul:")
+    second_id = second_shop_spooler._generate_stable_id("OneNote (Desktop)", "nul:")
+    assert first_id != second_id
+
+    legacy_id = PrinterSpoolerManager()._generate_stable_id("OneNote (Desktop)", "nul:")
+    first_shop_spooler.discover_local_printers = lambda: [{
+        "id": first_id,
+        "name": "OneNote (Desktop)",
+        "connection_info": "nul:",
+        "status": "READY",
+        "is_online": True,
+    }]
+    assert first_shop_spooler.get_printer_by_id(legacy_id)["id"] == first_id
 
 
 def test_printer_status_mapping_exact_states():
@@ -436,6 +455,77 @@ def test_dashboard_email_password_setup_routes(agent_config):
     connected = client.post("/api/auth/connect", json={"shop_id": "shop-test"})
     assert connected.status_code == 200
     service.connect_operator_shop.assert_awaited_once_with("shop-test")
+
+
+def test_shop_details_route_requires_station_authentication(agent_config):
+    service = WindowsAgentService(agent_config)
+    service.config.access_token = "station-access-token"
+    service.config.shop_id = "SHOP-101"
+    service.api_client.get_shop_details = AsyncMock(return_value={
+        "id": "SHOP-101",
+        "name": "Test Xerox Shop",
+        "address": "12 Main Market Road",
+        "is_verified": True,
+        "permanent_qr_payload": "privprint://shop?id=SHOP-101",
+    })
+    init_dashboard(service)
+
+    response = TestClient(dashboard_app).get("/api/shop")
+
+    assert response.status_code == 200
+    assert response.json()["permanent_qr_payload"] == "privprint://shop?id=SHOP-101"
+    service.api_client.get_shop_details.assert_awaited_once_with("SHOP-101")
+
+    service.config.access_token = None
+    unauthorized = TestClient(dashboard_app).get("/api/shop")
+    assert unauthorized.status_code == 401
+    assert service.api_client.get_shop_details.await_count == 1
+
+
+def test_auto_print_setting_is_saved_and_audited(agent_config, monkeypatch):
+    service = WindowsAgentService(agent_config)
+    service.config.access_token = "station-access-token"
+    service.config.shop_id = "SHOP-101"
+    saved = []
+    monkeypatch.setattr(service.config, "save", lambda: saved.append(True))
+    init_dashboard(service)
+    client = TestClient(dashboard_app)
+
+    response = client.post("/api/settings/auto-print", json={"enabled": False})
+
+    assert response.status_code == 200
+    assert response.json() == {"auto_print_enabled": False}
+    assert service.config.auto_print_enabled is False
+    assert saved == [True]
+    assert service.audit_log[-1]["eventType"] == "AUTO_PRINT_UPDATED"
+    assert "paused" in service.audit_log[-1]["details"]
+
+    service.config.access_token = None
+    unauthorized = client.post("/api/settings/auto-print", json={"enabled": True})
+    assert unauthorized.status_code == 401
+    assert service.config.auto_print_enabled is False
+
+
+def test_auto_print_setting_rolls_back_when_config_cannot_be_saved(agent_config, monkeypatch):
+    service = WindowsAgentService(agent_config)
+    service.config.access_token = "station-access-token"
+    service.config.shop_id = "SHOP-101"
+
+    def fail_to_save():
+        raise OSError("profile is read-only")
+
+    monkeypatch.setattr(service.config, "save", fail_to_save)
+    init_dashboard(service)
+
+    response = TestClient(dashboard_app).post(
+        "/api/settings/auto-print",
+        json={"enabled": False},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Could not save the automatic printing setting: profile is read-only"
+    assert service.config.auto_print_enabled is True
+    assert service.audit_log[-1]["eventType"] == "AUTO_PRINT_UPDATE_ERROR"
 
 
 @pytest.mark.asyncio

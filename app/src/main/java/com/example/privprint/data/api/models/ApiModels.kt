@@ -121,7 +121,7 @@ data class TokenRevocationRequest(
 enum class EnvironmentMode(val label: String, val baseUrl: String) {
     DEVELOPMENT("Development (Local Docker)", "http://10.0.2.2:8080/"),
     STAGING("Staging Cloud", "https://staging-api.privprint.com/"),
-    PRODUCTION("Production Cloud (HTTPS)", "https://ais-dev-6u62dc37mqabbjyehi6umo-408539472511.asia-southeast1.run.app/")
+    PRODUCTION("Production Cloud (HTTPS)", "https://api.privprint.com/")
 }
 
 // Shop & QR DTOs (server: ShopResponse)

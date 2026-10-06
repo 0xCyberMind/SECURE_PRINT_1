@@ -77,6 +77,61 @@ def test_get_shop_printers_and_sync(client: TestClient):
     assert any(p["id"] == "PRN-WIN-XRX405" and p["driver_name"] == "Xerox GPD PCL6 V5.6" for p in prn_list)
 
 
+def test_printer_sync_is_idempotent_and_rejects_cross_shop_id_collision(client: TestClient):
+    def create_shop(email: str, name: str):
+        operator = client.post("/api/v1/auth/register", json={
+            "email": email,
+            "password": "Password123!",
+            "role": "SHOP_OPERATOR",
+        }).json()
+        shop = client.post(
+            "/api/v1/shops",
+            json={"name": name, "address": "123 Main St"},
+            headers={"Authorization": f"Bearer {operator['access_token']}"},
+        )
+        assert shop.status_code == 201, shop.text
+        return shop.json(), operator["access_token"]
+
+    first_shop, first_token = create_shop("printer_sync_first@example.com", "First Printer Shop")
+    second_shop, second_token = create_shop("printer_sync_second@example.com", "Second Printer Shop")
+    printer = {
+        "id": "PRN-WIN-COLLISION",
+        "name": "Shared Windows Printer",
+        "model": "Laser Printer",
+        "driver_name": "Generic Driver",
+        "connection_info": "USB001",
+        "status": "READY",
+    }
+
+    first_sync_headers = {"Authorization": f"Bearer {first_token}"}
+    first_sync = client.post(
+        "/api/v1/printers/sync",
+        json={"shop_id": first_shop["id"], "printers": [{**printer, "shop_id": first_shop["id"]}]},
+        headers=first_sync_headers,
+    )
+    assert first_sync.status_code == 200, first_sync.text
+
+    updated_printer = {**printer, "name": "Renamed Windows Printer", "status": "BUSY"}
+    repeated_sync = client.post(
+        "/api/v1/printers/sync",
+        json={
+            "shop_id": first_shop["id"],
+            "printers": [{**updated_printer, "shop_id": first_shop["id"]}],
+        },
+        headers=first_sync_headers,
+    )
+    assert repeated_sync.status_code == 200, repeated_sync.text
+    assert repeated_sync.json()[0]["name"] == "Renamed Windows Printer"
+    assert repeated_sync.json()[0]["status"] == "BUSY"
+
+    second_sync = client.post(
+        "/api/v1/printers/sync",
+        json={"shop_id": second_shop["id"], "printers": [{**printer, "shop_id": second_shop["id"]}]},
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert second_sync.status_code == 409, second_sync.text
+
+
 def test_select_printer_valid_and_cross_shop_isolation(client: TestClient):
     # Setup Shop 1
     op1 = client.post("/api/v1/auth/register", json={

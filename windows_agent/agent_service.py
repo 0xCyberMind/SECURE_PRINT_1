@@ -45,7 +45,7 @@ class WindowsAgentService:
     def __init__(self, config: Optional[AgentConfig] = None):
         self.config = config or AgentConfig.load()
         self.secure_store = SecureCredentialStore()
-        self.spooler = PrinterSpoolerManager()
+        self.spooler = PrinterSpoolerManager(identity_namespace=self.config.shop_id or None)
         self.api_client = WindowsAgentApiClient(self.config)
         self.realtime_client = WindowsAgentRealtimeClient(
             config=self.config,
@@ -57,7 +57,7 @@ class WindowsAgentService:
         self._realtime_task: Optional[asyncio.Task] = None
         self._token_refresh_lock = asyncio.Lock()
         self._operator_token: Optional[str] = None
-        self._pending_operator_shops: Dict[str, str] = {}
+        self._pending_operator_shops: Dict[str, Dict[str, str]] = {}
         self.active_jobs: Dict[str, Dict[str, Any]] = {}
         self.job_history: List[Dict[str, Any]] = []
         self.audit_log: List[Dict[str, Any]] = []
@@ -86,6 +86,7 @@ class WindowsAgentService:
             self.config.access_token = creds.get("access_token")
             self.config.refresh_token = creds.get("refresh_token")
             self.config.shop_id = creds.get("shop_id") or self.config.shop_id
+            self.spooler.identity_namespace = self.config.shop_id or None
             self.api_client.access_token = self.config.access_token
             self.api_client.refresh_token = self.config.refresh_token
             private_key_pem = creds.get("station_private_key_pem")
@@ -214,6 +215,7 @@ class WindowsAgentService:
                     api_key=reg_info.get("api_key")
                 )
                 self.config.device_id = reg_info.get("device_id")
+                self.spooler.identity_namespace = self.config.shop_id or None
                 self.config.api_key = reg_info.get("api_key")
                 self.config.access_token = auth_info.get("accessToken") or auth_info.get("access_token")
                 self.config.refresh_token = auth_info.get("refreshToken") or auth_info.get("refresh_token")
@@ -259,7 +261,10 @@ class WindowsAgentService:
         shops = await self.api_client.list_operator_shops(operator_token)
         self._operator_token = operator_token
         self._pending_operator_shops = {
-            str(shop["id"]): str(shop.get("name") or "Xerox shop")
+            str(shop["id"]): {
+                "id": str(shop["id"]),
+                "name": str(shop.get("name") or "Xerox shop"),
+            }
             for shop in shops
             if shop.get("id")
         }
@@ -267,8 +272,8 @@ class WindowsAgentService:
             self._operator_token = None
             raise RuntimeError("No shop is linked to this operator account.")
         return [
-            {"id": shop_id, "name": name}
-            for shop_id, name in self._pending_operator_shops.items()
+            shop
+            for shop in self._pending_operator_shops.values()
         ]
 
     async def login_operator(self, email: str, password: str) -> List[Dict[str, str]]:
@@ -304,8 +309,9 @@ class WindowsAgentService:
         self._operator_token = operator_token
         shop_id = str(shop["id"])
         shop_name = str(shop.get("name") or "Xerox shop")
-        self._pending_operator_shops = {shop_id: shop_name}
-        return [{"id": shop_id, "name": shop_name}]
+        shop_option = {"id": shop_id, "name": shop_name}
+        self._pending_operator_shops = {shop_id: shop_option}
+        return [shop_option]
 
     async def connect_operator_shop(self, shop_id: str) -> None:
         if not self._operator_token or shop_id not in self._pending_operator_shops:
@@ -329,6 +335,7 @@ class WindowsAgentService:
             raise RuntimeError("Server did not return valid station authentication tokens.")
 
         self.config.device_id = device_id
+        self.spooler.identity_namespace = shop_id
         self.config.api_key = api_key
         self.config.access_token = access_token
         self.config.refresh_token = refresh_token

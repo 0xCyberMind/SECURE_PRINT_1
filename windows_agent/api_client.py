@@ -214,6 +214,13 @@ class WindowsAgentApiClient:
             res.raise_for_status()
             return res.json()
 
+    async def get_shop_details(self, shop_id: str) -> Dict[str, Any]:
+        url = f"{self.base_url}/api/v1/shops/{shop_id}"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            res = await client.get(url, headers=self._headers())
+            self._raise_for_response(res)
+            return res.json()
+
     async def select_printer(self, shop_id: str, printer_id: str, session_id: Optional[str] = None) -> Dict[str, Any]:
         url = f"{self.base_url}/api/v1/printers/select"
         payload = {

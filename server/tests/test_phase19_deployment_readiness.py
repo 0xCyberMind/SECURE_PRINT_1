@@ -71,16 +71,75 @@ def test_android_and_windows_production_endpoints():
     Verify Android Client and Windows Agent production endpoints point to https://api.privprint.com/
     and never use development credentials in production mode.
     """
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     android_api_client_path = os.path.join(
-        os.path.dirname(__file__), "..", "..", "app", "src", "main", "java", "com", "example", "privprint", "data", "api", "ApiClient.kt"
+        repo_root, "app", "src", "main", "java", "com", "example", "privprint", "data", "api", "ApiClient.kt"
     )
     assert os.path.exists(android_api_client_path)
     with open(android_api_client_path, "r", encoding="utf-8") as f:
         content = f.read()
         assert 'const val PROD_BASE_URL = "https://api.privprint.com/"' in content
 
+    with open(os.path.join(repo_root, "app", "build.gradle.kts"), encoding="utf-8") as f:
+        gradle_content = f.read()
+    assert 'orElse("https://api.privprint.com/")' in gradle_content
+
+    with open(
+        os.path.join(
+            repo_root,
+            "app",
+            "src",
+            "main",
+            "java",
+            "com",
+            "example",
+            "privprint",
+            "data",
+            "api",
+            "models",
+            "ApiModels.kt",
+        ),
+        encoding="utf-8",
+    ) as f:
+        assert 'PRODUCTION("Production Cloud (HTTPS)", "https://api.privprint.com/")' in f.read()
+
     assert WIN_PROD_URL == "https://api.privprint.com/"
     assert WIN_DEV_URL != WIN_PROD_URL
+
+    with open(os.path.join(repo_root, "server", "deploy", "nginx.conf"), encoding="utf-8") as f:
+        nginx_content = f.read()
+    assert nginx_content.count("server_name api.privprint.com;") == 2
+
+    with open(os.path.join(repo_root, "server", ".env.example"), encoding="utf-8") as f:
+        assert "https://api.privprint.com" in f.read()
+
+
+def test_production_compose_and_preflight_enforce_secrets_and_tls():
+    server_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    with open(os.path.join(server_dir, "docker-compose.prod.yml"), encoding="utf-8") as f:
+        compose = f.read()
+    assert "ENVIRONMENT: production" in compose
+    assert 'DEBUG: "false"' in compose
+    assert 'DEVELOPMENT_OTP_ENABLED: "false"' in compose
+    assert "${SECRET_KEY:?" in compose
+    assert "${POSTGRES_PASSWORD:?" in compose
+    assert "${REDIS_PASSWORD:?" in compose
+    assert "${TWILIO_VERIFY_SERVICE_SID:?" in compose
+
+    with open(os.path.join(server_dir, "deploy", "preflight-production.sh"), encoding="utf-8") as f:
+        preflight = f.read()
+    assert "openssl x509" in preflight
+    assert "-checkhost api.privprint.com" in preflight
+    assert "-checkend 604800" in preflight
+    assert "nginx -t" in preflight
+    assert "settings.ENVIRONMENT.value == \"production\"" in preflight
+
+    with open(os.path.join(server_dir, ".env.production.example"), encoding="utf-8") as f:
+        production_env_template = f.read()
+    assert "POSTGRES_PASSWORD=" in production_env_template
+    assert "REDIS_PASSWORD=" in production_env_template
+    assert "TWILIO_AUTH_TOKEN=" in production_env_template
+    assert "STORAGE_ENDPOINT=https://" in production_env_template
 
 
 def test_end_to_end_production_print_delivery_flow(client: TestClient):

@@ -1,5 +1,6 @@
 import pytest
 import time
+from unittest.mock import AsyncMock
 from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from app.models.entities import Device
@@ -97,6 +98,10 @@ async def test_reconnect_reconciliation_sequence(tmp_path):
     )
     service = WindowsAgentService(config)
     await service.initialize()
+    service.register_or_authenticate = AsyncMock()
+    service.api_client.get_device_state = AsyncMock(return_value={"status": "ONLINE"})
+    service.api_client.get_print_queue = AsyncMock(return_value=[])
+    service.sync_discovered_printers = AsyncMock()
 
     # Trigger 7-step reconnect sequence
     await service.reconcile_on_reconnect()
@@ -104,3 +109,7 @@ async def test_reconnect_reconciliation_sequence(tmp_path):
     audit_types = [entry["eventType"] for entry in service.audit_log]
     assert "RECONNECT_SEQUENCE_START" in audit_types
     assert "RECONNECT_SEQUENCE_COMPLETE" in audit_types
+    service.register_or_authenticate.assert_awaited_once()
+    service.api_client.get_device_state.assert_awaited_once_with(config.device_id)
+    service.api_client.get_print_queue.assert_awaited_once_with(config.shop_id)
+    service.sync_discovered_printers.assert_awaited_once()

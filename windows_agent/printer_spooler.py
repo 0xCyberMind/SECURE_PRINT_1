@@ -110,7 +110,8 @@ class PrinterSpoolerManager:
     query live spooler status, determine drivers, capabilities, and submit & track print jobs.
     """
 
-    def __init__(self):
+    def __init__(self, identity_namespace: Optional[str] = None):
+        self.identity_namespace = identity_namespace
         self.virtual_printers: List[Dict[str, Any]] = [
             {
                 "id": "PRN-HP-01",
@@ -190,7 +191,8 @@ class PrinterSpoolerManager:
             return False
 
     def _generate_stable_id(self, printer_name: str, port_name: Optional[str] = None) -> str:
-        raw = f"{printer_name}:{port_name or 'LOCAL'}"
+        identity = f"{printer_name}:{port_name or 'LOCAL'}"
+        raw = f"{self.identity_namespace}:{identity}" if self.identity_namespace else identity
         h = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:8].upper()
         return f"PRN-WIN-{h}"
 
@@ -298,6 +300,8 @@ class PrinterSpoolerManager:
         for p in printers:
             if p["id"] == printer_id or p["name"] == printer_id:
                 return p
+            if self.identity_namespace and printer_id == self._generate_legacy_id(p):
+                return p
         # The physically discovered fleet has no such id: fall back to the
         # simulated fleet so cloud-assigned printer IDs (e.g. PRN-HP-01 sent
         # by the backend) and test environments always resolve.
@@ -307,6 +311,12 @@ class PrinterSpoolerManager:
                 simulated["simulated"] = True
                 return simulated
         return None
+
+    @staticmethod
+    def _generate_legacy_id(printer: Dict[str, Any]) -> str:
+        identity = f"{printer['name']}:{printer.get('connection_info') or 'LOCAL'}"
+        h = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:8].upper()
+        return f"PRN-WIN-{h}"
 
     def validate_printer_for_job(self, printer_id: str) -> Dict[str, Any]:
         """

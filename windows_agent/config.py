@@ -18,7 +18,7 @@ def _config_directory() -> str:
 
 CONFIG_FILE_PATH = os.path.join(_config_directory(), "shop_station_config.json")
 
-PROD_SERVER_BASE_URL = "https://secure-print-1.onrender.com/"
+PROD_SERVER_BASE_URL = "https://api.privprint.com/"
 DEV_SERVER_BASE_URL = "https://ais-dev-6u62dc37mqabbjyehi6umo-408539472511.asia-southeast1.run.app/"
 
 @dataclass

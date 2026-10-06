@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import PrivPrintException, ErrorCode
@@ -105,39 +106,56 @@ async def sync_shop_printers(
     synced_printers = []
 
     for prn_data in payload.printers:
+        printer_values = {
+            "name": prn_data.name,
+            "model": prn_data.model or "Generic",
+            "driver_name": prn_data.driver_name or "NOT_REPORTED",
+            "connection_info": prn_data.connection_info or "NOT_REPORTED",
+            "status": prn_data.status,
+            "is_default": prn_data.is_default,
+            "is_online": prn_data.is_online,
+            "supports_color": prn_data.supports_color,
+            "supports_duplex": prn_data.supports_duplex,
+            "supported_paper_sizes": prn_data.supported_paper_sizes or "A4, Letter",
+            "paper_tray_status": prn_data.paper_tray_status,
+            "toner_level_percent": prn_data.toner_level_percent,
+        }
         existing = await printer_repo.get_by_id_and_shop(prn_data.id, payload.shop_id)
         if existing:
-            existing.name = prn_data.name
-            existing.model = prn_data.model or "Generic"
-            existing.driver_name = prn_data.driver_name or "NOT_REPORTED"
-            existing.connection_info = prn_data.connection_info or "NOT_REPORTED"
-            existing.status = prn_data.status
-            existing.is_default = prn_data.is_default
-            existing.is_online = prn_data.is_online
-            existing.supports_color = prn_data.supports_color
-            existing.supports_duplex = prn_data.supports_duplex
-            existing.supported_paper_sizes = prn_data.supported_paper_sizes or "A4, Letter"
-            existing.paper_tray_status = prn_data.paper_tray_status
-            existing.toner_level_percent = prn_data.toner_level_percent
+            for field, value in printer_values.items():
+                setattr(existing, field, value)
             synced_printers.append(existing)
         else:
-            new_prn = await printer_repo.create(
-                id=prn_data.id,
-                shop_id=payload.shop_id,
-                name=prn_data.name,
-                model=prn_data.model or "Generic",
-                driver_name=prn_data.driver_name or "NOT_REPORTED",
-                connection_info=prn_data.connection_info or "NOT_REPORTED",
-                status=prn_data.status,
-                is_default=prn_data.is_default,
-                is_online=prn_data.is_online,
-                supports_color=prn_data.supports_color,
-                supports_duplex=prn_data.supports_duplex,
-                supported_paper_sizes=prn_data.supported_paper_sizes or "A4, Letter",
-                paper_tray_status=prn_data.paper_tray_status,
-                toner_level_percent=prn_data.toner_level_percent
-            )
-            synced_printers.append(new_prn)
+            conflicting = await printer_repo.get_by_id(prn_data.id)
+            if conflicting:
+                raise PrivPrintException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    code=ErrorCode.CONFLICT,
+                    message="Printer ID is already registered to another shop",
+                )
+
+            try:
+                async with db.begin_nested():
+                    new_prn = await printer_repo.create(
+                        id=prn_data.id,
+                        shop_id=payload.shop_id,
+                        **printer_values,
+                    )
+                synced_printers.append(new_prn)
+            except IntegrityError:
+                # Concurrent station syncs may both observe a missing printer.
+                existing = await printer_repo.get_by_id(prn_data.id)
+                if not existing:
+                    raise
+                if existing.shop_id != payload.shop_id:
+                    raise PrivPrintException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        code=ErrorCode.CONFLICT,
+                        message="Printer ID is already registered to another shop",
+                    )
+                for field, value in printer_values.items():
+                    setattr(existing, field, value)
+                synced_printers.append(existing)
 
     await db.commit()
     return [PrinterResponse.model_validate(p) for p in synced_printers]

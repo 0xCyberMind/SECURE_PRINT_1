@@ -1,5 +1,5 @@
 {
-  "server_base_url": "https://secure-print-1.onrender.com/",
+  "server_base_url": "https://api.privprint.com/",
   "shop_id": "",
   "device_name": "Windows Xerox Station Agent",
   "device_id": null,

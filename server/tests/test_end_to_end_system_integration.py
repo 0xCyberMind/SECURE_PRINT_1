@@ -2,9 +2,77 @@ import pytest
 import asyncio
 import secrets
 import hashlib
+import base64
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi.testclient import TestClient
 from windows_agent.config import AgentConfig
 from windows_agent.agent_service import WindowsAgentService
+
+
+def _assert_success(response, operation: str, parse_json: bool = True):
+    if not response.is_success:
+        raise AssertionError(
+            f"Test adapter request {operation} failed with HTTP "
+            f"{response.status_code}: {response.text}"
+        )
+    if response.status_code == 204 or not response.content:
+        return None
+    if not parse_json:
+        return response
+    return response.json()
+
+
+async def _setup_test_station(client: TestClient, device: dict, shop_id: str):
+    auth_response = client.post(
+        "/api/v1/devices/authenticate",
+        json={"device_id": device["device_id"], "api_key": device["api_key"]},
+    )
+    auth = _assert_success(auth_response, "POST /api/v1/devices/authenticate")
+    station_token = auth["access_token"]
+    config = AgentConfig(
+        server_base_url="http://testserver",
+        shop_id=shop_id,
+        device_id=device["device_id"],
+        api_key=device["api_key"],
+        access_token=station_token,
+        refresh_token=auth["refresh_token"],
+        auto_print_enabled=False,
+    )
+    agent = WindowsAgentService(config)
+    agent.secure_store.retrieve_credentials = lambda: None
+    agent.secure_store.store_credentials = lambda **kwargs: None
+    await agent.initialize()
+
+    key_response = client.put(
+        f"/api/v1/devices/{device['device_id']}/print-key",
+        json={"public_key": agent._station_public_key_base64()},
+        headers={"Authorization": f"Bearer {station_token}"},
+    )
+    _assert_success(key_response, "PUT /api/v1/devices/{device_id}/print-key")
+    return agent, station_token
+
+
+def _encrypted_upload(plaintext: bytes, agent: WindowsAgentService):
+    aes_key = AESGCM.generate_key(bit_length=256)
+    iv = secrets.token_bytes(12)
+    ciphertext = AESGCM(aes_key).encrypt(iv, plaintext, None)
+    public_key = agent._station_private_key.public_key()
+    wrapped_key = public_key.encrypt(
+        aes_key,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None,
+        ),
+    )
+    return ciphertext, {
+        "iv_hex": iv.hex(),
+        "wrapped_keys": {
+            agent.config.device_id: base64.b64encode(wrapped_key).decode("ascii")
+        },
+    }
 
 
 class ApiClientTestAdapter:
@@ -26,51 +94,73 @@ class ApiClientTestAdapter:
 
     async def get_print_queue(self, shop_id: str):
         res = self.client.get(f"/api/v1/print/jobs?shopId={shop_id}", headers=self._headers())
-        if res.status_code == 200:
-            return res.json()
-        return []
+        return _assert_success(res, "GET /api/v1/print/jobs")
 
     async def start_printing(self, job_id: str):
         res = self.client.post(f"/api/v1/print/jobs/{job_id}/start", headers=self._headers())
-        if res.status_code == 200:
-            return res.json()
-        return {}
+        return _assert_success(res, "POST /api/v1/print/jobs/{job_id}/start")
 
     async def increment_copy(self, job_id: str, delta: int = 1):
         res = self.client.post(f"/api/v1/print/jobs/{job_id}/increment-copy?delta={delta}", headers=self._headers())
-        if res.status_code == 200:
-            return res.json()
-        return {}
+        return _assert_success(res, "POST /api/v1/print/jobs/{job_id}/increment-copy")
 
     async def fail_job(self, job_id: str, reason: str):
         res = self.client.post(f"/api/v1/print/jobs/{job_id}/fail?reason={reason}", headers=self._headers())
-        if res.status_code == 200:
-            return res.json()
-        return {}
+        return _assert_success(res, "POST /api/v1/print/jobs/{job_id}/fail")
 
     async def execute_cleanup(self, job_id: str):
         res = self.client.post(f"/api/v1/cleanup/execute/{job_id}", headers=self._headers())
-        if res.status_code == 200:
-            return res.json()
-        return {}
+        return _assert_success(res, "POST /api/v1/cleanup/execute/{job_id}")
 
     async def sync_printers(self, shop_id: str, printers):
         res = self.client.post("/api/v1/printers/sync", json={"shop_id": shop_id, "printers": printers}, headers=self._headers())
-        if res.status_code == 200:
-            return res.json()
-        return []
+        return _assert_success(res, "POST /api/v1/printers/sync")
 
     async def get_device_state(self, device_id: str):
         res = self.client.get(f"/api/v1/devices/{device_id}", headers=self._headers())
-        if res.status_code == 200:
-            return res.json()
-        return {}
+        return _assert_success(res, "GET /api/v1/devices/{device_id}")
 
     async def send_heartbeat(self, device_id: str):
         res = self.client.post(f"/api/v1/devices/{device_id}/heartbeat", headers=self._headers())
-        if res.status_code == 200:
-            return res.json()
-        return {}
+        return _assert_success(res, "POST /api/v1/devices/{device_id}/heartbeat")
+
+    async def register_device_print_key(self, device_id: str, public_key: str):
+        res = self.client.put(
+            f"/api/v1/devices/{device_id}/print-key",
+            json={"public_key": public_key},
+            headers=self._headers(),
+        )
+        _assert_success(res, "PUT /api/v1/devices/{device_id}/print-key")
+
+    async def get_print_content(self, document_id: str, job_id: str):
+        res = self.client.get(
+            f"/api/v1/documents/{document_id}/print-content",
+            params={"job_id": job_id},
+            headers=self._headers(),
+        )
+        _assert_success(
+            res,
+            "GET /api/v1/documents/{document_id}/print-content",
+            parse_json=False,
+        )
+        return {
+            "ciphertext": res.content,
+            "wrapped_key": res.headers.get("X-PrivPrint-Wrapped-Key"),
+            "iv": res.headers.get("X-PrivPrint-IV"),
+            "sha256": res.headers.get("X-PrivPrint-SHA256"),
+            "filename": res.headers.get("X-PrivPrint-Filename"),
+        }
+
+
+def test_test_adapter_does_not_hide_http_errors():
+    class UnauthorizedResponse:
+        status_code = 401
+        is_success = False
+        content = b'{"detail":"Unauthorized"}'
+        text = '{"detail":"Unauthorized"}'
+
+    with pytest.raises(AssertionError, match="HTTP 401"):
+        _assert_success(UnauthorizedResponse(), "GET /api/v1/print/jobs")
 
 
 @pytest.mark.asyncio
@@ -108,6 +198,7 @@ async def test_end_to_end_single_user_complete_lifecycle(client: TestClient):
         "hardware_fingerprint": "HW-FP-E2E-99"
     }, headers={"Authorization": f"Bearer {op_token}", **shop_headers_ip}).json()
     device_id = dev_reg["device_id"]
+    agent, station_token = await _setup_test_station(client, dev_reg, shop_id)
 
     # Discover and Sync Printers
     printers_payload = [
@@ -127,10 +218,11 @@ async def test_end_to_end_single_user_complete_lifecycle(client: TestClient):
             "toner_level_percent": 90
         }
     ]
-    client.post("/api/v1/printers/sync", json={
+    sync_res = client.post("/api/v1/printers/sync", json={
         "shop_id": shop_id,
-        "printers": printers_payload
+        "printers": [{**printer, "shop_id": shop_id} for printer in printers_payload]
     }, headers={"Authorization": f"Bearer {op_token}", **shop_headers_ip})
+    assert sync_res.status_code == 200, sync_res.text
 
     # 2. Android User on Cellular Network logs in
     user_res = client.post("/api/v1/auth/register", json={
@@ -155,7 +247,8 @@ async def test_end_to_end_single_user_complete_lifecycle(client: TestClient):
     session_id = scan_data["id"]
 
     # 4. User selects Document & performs client-side AES-256-GCM encryption
-    payload_bytes = secrets.token_bytes(2048)
+    plaintext = b"%PDF-1.7\nPrivPrint test document\n%%EOF\n"
+    payload_bytes, encryption_metadata = _encrypted_upload(plaintext, agent)
     sha256_hash = hashlib.sha256(payload_bytes).hexdigest()
 
     doc_init = client.post("/api/v1/documents/init-upload", json={
@@ -164,12 +257,20 @@ async def test_end_to_end_single_user_complete_lifecycle(client: TestClient):
         "file_size_bytes": len(payload_bytes),
         "mime_type": "application/pdf",
         "sha256_hash": sha256_hash,
-        "iv_hex": "0123456789abcdef0123456789abcdef",
+        "iv_hex": encryption_metadata["iv_hex"],
         "key_fingerprint": "fp_client_key_9988",
+        "wrapped_keys": encryption_metadata["wrapped_keys"],
         "copies_authorized": 2
     }, headers=user_auth).json()
     doc_id = doc_init["document_id"]
     upload_id = doc_init["upload_id"]
+
+    chunk_res = client.post(
+        f"/api/v1/documents/{upload_id}/chunk",
+        content=payload_bytes,
+        headers={**user_auth, "Content-Type": "application/octet-stream"},
+    )
+    assert chunk_res.status_code == 200, chunk_res.text
 
     # Complete upload
     comp_res = client.post(f"/api/v1/documents/{upload_id}/complete-upload", json={
@@ -199,16 +300,11 @@ async def test_end_to_end_single_user_complete_lifecycle(client: TestClient):
     assert auth_res.status_code == 200
 
     # 6. Windows Shop Agent on Shop Network processes job via Windows Spooler Pipeline
-    agent_config = AgentConfig(
-        server_base_url="http://testserver",
-        shop_id=shop_id,
-        device_id=device_id,
-        access_token=op_token,
-        auto_print_enabled=False
-    )
-    agent = WindowsAgentService(agent_config)
-    agent.api_client = ApiClientTestAdapter(client, op_token, shop_id, device_id)
-    await agent.initialize()
+    agent.api_client = ApiClientTestAdapter(client, station_token, shop_id, device_id)
+    fetched_content = await agent.api_client.get_print_content(doc_id, job_id)
+    decrypted_content = agent._ephemeral_decrypt(fetched_content)
+    assert decrypted_content == plaintext
+    decrypted_content[:] = b"\x00" * len(decrypted_content)
 
     # Process job through verified pipeline
     await agent.process_print_job(job_id)
@@ -381,16 +477,30 @@ async def test_disconnect_reconnect_recovery_and_resumption(client: TestClient):
     u = client.post("/api/v1/auth/register", json={
         "email": "recon_user@example.com", "password": "Password123!", "role": "USER"
     }).json()
+    agent, station_token = await _setup_test_station(client, dev, shop["id"])
     u_auth = {"Authorization": f"Bearer {u['access_token']}"}
 
     sess = client.post("/api/v1/sessions", json={"shop_id": shop["id"]}, headers=u_auth).json()
+    plaintext = b"%PDF-1.7\nReconnect recovery test\n%%EOF\n"
+    payload_bytes, encryption_metadata = _encrypted_upload(plaintext, agent)
+    sha256_hash = hashlib.sha256(payload_bytes).hexdigest()
     doc = client.post("/api/v1/documents/init-upload", json={
-        "session_id": sess["id"], "filename": "offline_queued.pdf.enc", "file_size_bytes": 1024,
-        "mime_type": "application/pdf", "sha256_hash": "d" * 64, "iv_hex": "0123456789abcdef",
-        "key_fingerprint": "fp_key_dddd", "copies_authorized": 1
+        "session_id": sess["id"], "filename": "offline_queued.pdf.enc", "file_size_bytes": len(payload_bytes),
+        "mime_type": "application/pdf", "sha256_hash": sha256_hash,
+        "iv_hex": encryption_metadata["iv_hex"],
+        "key_fingerprint": "fp_key_dddd",
+        "wrapped_keys": encryption_metadata["wrapped_keys"],
+        "copies_authorized": 1
     }, headers=u_auth).json()
+    chunk_res = client.post(
+        f"/api/v1/documents/{doc['upload_id']}/chunk",
+        content=payload_bytes,
+        headers={**u_auth, "Content-Type": "application/octet-stream"},
+    )
+    assert chunk_res.status_code == 200, chunk_res.text
     client.post(f"/api/v1/documents/{doc['upload_id']}/complete-upload", json={
-        "document_id": doc["document_id"], "session_id": sess["id"]
+        "document_id": doc["document_id"], "session_id": sess["id"],
+        "sha256_hash": sha256_hash, "file_size_bytes": len(payload_bytes),
     }, headers=u_auth)
 
     # Job submitted while Agent is offline
@@ -403,16 +513,11 @@ async def test_disconnect_reconnect_recovery_and_resumption(client: TestClient):
     client.post(f"/api/v1/jobs/{job_id}/authorize", headers=u_auth)
 
     # Agent boots up/reconnects after outage
-    agent_config = AgentConfig(
-        server_base_url="http://testserver",
-        shop_id=shop["id"],
-        device_id=dev["device_id"],
-        access_token=op["access_token"],
-        auto_print_enabled=False
-    )
-    agent = WindowsAgentService(agent_config)
-    agent.api_client = ApiClientTestAdapter(client, op["access_token"], shop["id"], dev["device_id"])
-    await agent.initialize()
+    agent.api_client = ApiClientTestAdapter(client, station_token, shop["id"], dev["device_id"])
+    fetched_content = await agent.api_client.get_print_content(doc["document_id"], job_id)
+    decrypted_content = agent._ephemeral_decrypt(fetched_content)
+    assert decrypted_content == plaintext
+    decrypted_content[:] = b"\x00" * len(decrypted_content)
 
     # Reconnect sequence automatically queries DB for missed/queued jobs and resumes
     await agent.reconcile_on_reconnect()

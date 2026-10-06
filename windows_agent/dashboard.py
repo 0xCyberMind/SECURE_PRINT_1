@@ -257,7 +257,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <h4 style="margin-bottom: 20px;">Station Configuration</h4>
                     <div class="form-group">
                         <label>PrivPrint Server Base URL</label>
-                        <input type="text" id="s-server-url" value="https://secure-print-1.onrender.com/" readonly>
+                        <input type="text" id="s-server-url" value="https://api.privprint.com/" readonly>
                     </div>
                     <div class="form-group">
                         <label>Assigned Xerox Shop ID</label>
@@ -452,6 +452,7 @@ async def get_status_api():
     return JSONResponse({
         "authenticated": bool(agent_service.config.access_token and agent_service.config.shop_id),
         "shop_id": agent_service.config.shop_id,
+        "auto_print_enabled": agent_service.config.auto_print_enabled,
         "server_base_url": agent_service.config.server_base_url,
         "device_id": agent_service.config.device_id,
         "worker_executable": os.path.abspath(sys.executable),
@@ -464,6 +465,18 @@ async def get_status_api():
         "job_history": agent_service.job_history,
         "audit_log": agent_service.audit_log
     })
+
+@dashboard_app.get("/api/shop")
+async def get_shop_api():
+    if not agent_service:
+        raise HTTPException(status_code=503, detail="Windows station service is starting.")
+    if not agent_service.config.access_token or not agent_service.config.shop_id:
+        raise HTTPException(status_code=401, detail="Connect this station to a Xerox shop first.")
+    try:
+        return await agent_service.api_client.get_shop_details(agent_service.config.shop_id)
+    except Exception as exc:
+        agent_service.log_audit("SHOP_DETAILS_ERROR", str(exc), severity="ERROR")
+        raise HTTPException(status_code=502, detail=f"Could not load Xerox shop details: {exc}") from exc
 
 
 @dashboard_app.get("/api/queue")
@@ -496,6 +509,33 @@ async def refresh_printers_api():
     except Exception as exc:
         agent_service.log_audit("PRINTER_SYNC_ERROR", str(exc), severity="ERROR")
         raise HTTPException(status_code=502, detail=f"Could not sync Windows printers to the cloud: {exc}") from exc
+
+class AutoPrintRequest(BaseModel):
+    enabled: bool
+
+
+@dashboard_app.post("/api/settings/auto-print")
+async def set_auto_print_api(payload: AutoPrintRequest):
+    if not agent_service:
+        raise HTTPException(status_code=503, detail="Windows station service is starting.")
+    if not agent_service.config.access_token or not agent_service.config.shop_id:
+        raise HTTPException(status_code=401, detail="Connect this station to a Xerox shop first.")
+    previous_setting = agent_service.config.auto_print_enabled
+    agent_service.config.auto_print_enabled = payload.enabled
+    try:
+        agent_service.config.save()
+    except OSError as exc:
+        agent_service.config.auto_print_enabled = previous_setting
+        agent_service.log_audit("AUTO_PRINT_UPDATE_ERROR", str(exc), severity="ERROR")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not save the automatic printing setting: {exc}",
+        ) from exc
+    agent_service.log_audit(
+        "AUTO_PRINT_UPDATED",
+        f"Automatic printing {'enabled' if payload.enabled else 'paused'} by shop operator",
+    )
+    return {"auto_print_enabled": agent_service.config.auto_print_enabled}
 
 
 @dashboard_app.post("/api/realtime/reconnect")

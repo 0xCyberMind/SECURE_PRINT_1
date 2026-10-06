@@ -1,7 +1,8 @@
 import os
 from enum import Enum
 from typing import List, Union
-from pydantic import Field, field_validator
+from urllib.parse import urlsplit
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -36,6 +37,16 @@ class Settings(BaseSettings):
     )
     DATABASE_POOL_SIZE: int = 20
     DATABASE_MAX_OVERFLOW: int = 10
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def normalize_database_url(cls, value: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError("DATABASE_URL must be a PostgreSQL connection URL")
+        parsed = urlsplit(value)
+        if parsed.scheme in {"postgres", "postgresql"}:
+            return parsed._replace(scheme="postgresql+asyncpg").geturl()
+        return value
 
     # Redis
     REDIS_URL: str = Field(
@@ -102,12 +113,94 @@ class Settings(BaseSettings):
     @field_validator("ENVIRONMENT", mode="before")
     @classmethod
     def validate_environment(cls, v: str) -> EnvironmentType:
+        if isinstance(v, EnvironmentType):
+            return v
         if isinstance(v, str):
             v_lower = v.lower().strip()
             for env in EnvironmentType:
                 if env.value == v_lower:
                     return env
-        return EnvironmentType.DEVELOPMENT
+        raise ValueError("ENVIRONMENT must be development, staging, or production")
+
+    @model_validator(mode="after")
+    def validate_production_configuration(self) -> "Settings":
+        if self.ENVIRONMENT != EnvironmentType.PRODUCTION:
+            return self
+
+        problems: List[str] = []
+        if (
+            len(self.SECRET_KEY) < 32
+            or self.SECRET_KEY == Settings.model_fields["SECRET_KEY"].default
+            or self.SECRET_KEY.upper().startswith("REPLACE_WITH")
+        ):
+            problems.append("SECRET_KEY must be a unique value with at least 32 characters")
+        if self.SECRET_KEY.lower().startswith("change_this"):
+            problems.append("SECRET_KEY must not be the example placeholder")
+        if self.DEBUG:
+            problems.append("DEBUG must be false")
+        if self.DEVELOPMENT_OTP_ENABLED:
+            problems.append("DEVELOPMENT_OTP_ENABLED must be false")
+
+        database = urlsplit(self.DATABASE_URL)
+        if (
+            database.scheme != "postgresql+asyncpg"
+            or not database.hostname
+            or database.hostname in {"localhost", "127.0.0.1", "::1"}
+            or not database.username
+            or not database.password
+            or "REPLACE_WITH" in database.password.upper()
+        ):
+            problems.append("DATABASE_URL must target a remote PostgreSQL service with credentials")
+
+        redis = urlsplit(self.REDIS_URL)
+        if (
+            redis.scheme not in {"redis", "rediss"}
+            or not redis.hostname
+            or redis.hostname in {"localhost", "127.0.0.1", "::1"}
+            or not redis.password
+            or "REPLACE_WITH" in redis.password.upper()
+        ):
+            problems.append("REDIS_URL must target a remote Redis service with authentication")
+
+        storage = urlsplit(self.STORAGE_ENDPOINT)
+        if (
+            storage.scheme != "https"
+            or not storage.hostname
+            or storage.hostname in {"localhost", "127.0.0.1", "::1"}
+            or "REPLACE_WITH" in storage.hostname.upper()
+            or not self.STORAGE_USE_SSL
+        ):
+            problems.append("storage must use an HTTPS endpoint and TLS outside localhost")
+        if (
+            not self.STORAGE_ACCESS_KEY
+            or self.STORAGE_ACCESS_KEY == "minioadmin"
+            or self.STORAGE_ACCESS_KEY.upper().startswith("REPLACE_WITH")
+        ):
+            problems.append("STORAGE_ACCESS_KEY must be set to a non-default value")
+        if (
+            not self.STORAGE_SECRET_KEY
+            or self.STORAGE_SECRET_KEY == "minioadmin"
+            or self.STORAGE_SECRET_KEY.upper().startswith("REPLACE_WITH")
+        ):
+            problems.append("STORAGE_SECRET_KEY must be set to a non-default value")
+
+        if not all((
+            self.TWILIO_ACCOUNT_SID,
+            self.TWILIO_AUTH_TOKEN,
+            self.TWILIO_VERIFY_SERVICE_SID,
+        )) or any(
+            value.upper().startswith(("AC_REPLACE", "VA_REPLACE", "REPLACE_WITH"))
+            for value in (
+                self.TWILIO_ACCOUNT_SID,
+                self.TWILIO_AUTH_TOKEN,
+                self.TWILIO_VERIFY_SERVICE_SID,
+            )
+        ):
+            problems.append("all Twilio Verify credentials must be set")
+
+        if problems:
+            raise ValueError("Invalid production configuration: " + "; ".join(problems))
+        return self
 
     model_config = SettingsConfigDict(
         env_file=".env",
