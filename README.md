@@ -1,15 +1,5 @@
 <p align="center">
-  <svg xmlns="http://www.w3.org/2000/svg" width="92" height="92" viewBox="0 0 92 92" role="img" aria-labelledby="privprint-logo-title">
-    <title id="privprint-logo-title">PrivPrint shield, document, and print mark</title>
-    <path d="M46 5 78 17v23c0 21-13 37-32 47C27 77 14 61 14 40V17L46 5Z" fill="none" stroke="#2F80ED" stroke-width="5" stroke-linejoin="round"/>
-    <path d="M34 25h20l9 9v29H34V25Z" fill="none" stroke="#F3F4F6" stroke-width="4" stroke-linejoin="round"/>
-    <path d="M53 25v10h10M40 43h17M40 50h17M40 57h11" fill="none" stroke="#F3F4F6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M25 72h42" fill="none" stroke="#2F80ED" stroke-width="4" stroke-linecap="round"/>
-  </svg>
-  <br>
-  <strong>PRIVPRINT</strong>
-  <br>
-  <sub>PRIVATE BY DESIGN. PRINTED ON YOUR TERMS.</sub>
+  <img src="public/assets/privprint-logo.png" alt="PrivPrint — secure printing, anywhere" width="360">
 </p>
 
 <p align="center">
