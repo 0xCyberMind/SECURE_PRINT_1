@@ -1187,6 +1187,10 @@ class StationBridge {
         val request = Request.Builder().url(baseUrl + path).get()
         val response = executeResponse(request)
         response.use {
+            if (!it.isSuccessful) {
+                val text = it.body?.string().orEmpty()
+                throw IOException(responseDetail(text, it.code))
+            }
             val bytes = it.body?.bytes() ?: throw IOException("Cloud response did not contain document data.")
             return DownloadedDocument(bytes, it.headers.toMap())
         }

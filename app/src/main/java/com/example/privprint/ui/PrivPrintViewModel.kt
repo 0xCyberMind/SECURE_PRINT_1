@@ -19,6 +19,7 @@ import com.example.privprint.data.model.PrinterStatus
 import com.example.privprint.data.model.SelectedDocument
 import com.example.privprint.data.model.Shop
 import com.example.privprint.data.repository.PrivPrintRepository
+import com.example.privprint.data.util.DocumentMerger
 import com.example.privprint.service.PrintEngine
 import com.example.privprint.service.PrintingProgressState
 import com.example.privprint.service.printer.AndroidPrintAdapter
@@ -612,8 +613,13 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun selectDocuments(docs: List<SelectedDocument>) {
+        val merged = if (docs.size > 1) {
+            runCatching { DocumentMerger.mergeDocuments(getApplication(), docs) }.getOrDefault(docs.firstOrNull())
+        } else {
+            docs.firstOrNull()
+        }
         _userUiState.value = _userUiState.value.copy(
-            selectedDocument = docs.firstOrNull(),
+            selectedDocument = merged,
             selectedDocuments = docs,
             currentScreen = UserScreen.PRINT_SETTINGS
         )
@@ -623,8 +629,13 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
         val currentList = _userUiState.value.selectedDocuments.toMutableList()
         if (!currentList.contains(doc)) {
             currentList.add(doc)
+            val merged = if (currentList.size > 1) {
+                runCatching { DocumentMerger.mergeDocuments(getApplication(), currentList) }.getOrDefault(currentList.firstOrNull())
+            } else {
+                currentList.firstOrNull()
+            }
             _userUiState.value = _userUiState.value.copy(
-                selectedDocument = currentList.firstOrNull(),
+                selectedDocument = merged,
                 selectedDocuments = currentList
             )
         }
@@ -633,8 +644,13 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
     fun removeDocument(doc: SelectedDocument) {
         val currentList = _userUiState.value.selectedDocuments.toMutableList()
         currentList.remove(doc)
+        val merged = if (currentList.size > 1) {
+            runCatching { DocumentMerger.mergeDocuments(getApplication(), currentList) }.getOrDefault(currentList.firstOrNull())
+        } else {
+            currentList.firstOrNull()
+        }
         _userUiState.value = _userUiState.value.copy(
-            selectedDocument = currentList.firstOrNull(),
+            selectedDocument = merged,
             selectedDocuments = currentList
         )
     }
@@ -678,7 +694,12 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun confirmAndSubmitJob() {
         val session = activeSession.value
-        val doc = _userUiState.value.selectedDocument
+        val allDocs = _userUiState.value.selectedDocuments
+        val doc = if (allDocs.size > 1) {
+            runCatching { DocumentMerger.mergeDocuments(getApplication(), allDocs) }.getOrDefault(_userUiState.value.selectedDocument)
+        } else {
+            _userUiState.value.selectedDocument ?: allDocs.firstOrNull()
+        }
         val settings = _userUiState.value.printSettings
 
         if (session == null || doc == null) {

@@ -1,8 +1,11 @@
 package com.example.privprint.ui.user
 
 import android.content.Context
+import android.graphics.pdf.PdfRenderer
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
+import java.io.File
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -490,10 +493,22 @@ private fun parseDocumentFromUri(context: Context, uri: Uri): SelectedDocument {
         "FALLBACK-DOCUMENT-BYTES".toByteArray()
     }
 
-    val pageCount = when {
-        mimeType.contains("pdf", ignoreCase = true) -> 5
-        mimeType.startsWith("image/") -> 1
-        else -> 2
+    val pageCount = if (mimeType.contains("pdf", ignoreCase = true) || name.endsWith(".pdf", ignoreCase = true)) {
+        runCatching {
+            val temp = File.createTempFile("page_count_", ".pdf", context.cacheDir)
+            temp.writeBytes(bytes)
+            val pfd = ParcelFileDescriptor.open(temp, ParcelFileDescriptor.MODE_READ_ONLY)
+            val renderer = PdfRenderer(pfd)
+            val count = renderer.pageCount
+            renderer.close()
+            pfd.close()
+            temp.delete()
+            count
+        }.getOrDefault(1)
+    } else if (mimeType.startsWith("image/") || name.endsWith(".jpg", ignoreCase = true) || name.endsWith(".png", ignoreCase = true) || name.endsWith(".jpeg", ignoreCase = true)) {
+        1
+    } else {
+        1
     }
 
     return SelectedDocument(

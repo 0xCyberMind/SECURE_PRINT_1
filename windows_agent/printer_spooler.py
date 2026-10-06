@@ -328,7 +328,7 @@ class PrinterSpoolerManager:
             printer
             for printer in printers
             if not self._is_document_output_printer(printer)
-        ] or printers
+        ]
 
         if printer_id:
             match = next(
