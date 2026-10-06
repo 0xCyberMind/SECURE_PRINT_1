@@ -1,6 +1,5 @@
-<p align="center">
-  <img src="public/assets/privprint-logo.png" alt="PrivPrint — secure printing, anywhere" width="360">
-</p>
+<h1 align="center"><img src="public/assets/privprint-logo.png" alt="PrivPrint secure printer icon" width="54" align="middle"> PrivPrint</h1>
+<p align="center"><sub>SECURE PRINTING · ANYWHERE</sub></p>
 
 <p align="center">
   <a href="https://developer.android.com"><img alt="Android and Kotlin" src="https://img.shields.io/badge/Android-Kotlin%20%7C%20Compose-3DDC84?logo=android&logoColor=white"></a>
