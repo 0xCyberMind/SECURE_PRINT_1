@@ -539,16 +539,19 @@ async def get_document(
     # Check if Operator of shop processing an active job for this document
     is_authorized_operator = False
     if principal.role == UserRole.SHOP_OPERATOR and principal.shop_id:
-        stmt = (
-            select(PrintJob)
-            .where(
-                PrintJob.document_id == doc.id,
-                PrintJob.shop_id == principal.shop_id
+        from app.repositories.shop_repo import ShopRepository
+        shop_check = await ShopRepository(db).get_by_id(principal.shop_id)
+        if shop_check and shop_check.owner_id == principal.user_id:
+            stmt = (
+                select(PrintJob)
+                .where(
+                    PrintJob.document_id == doc.id,
+                    PrintJob.shop_id == principal.shop_id
+                )
             )
-        )
-        res = await db.execute(stmt)
-        if res.scalars().first():
-            is_authorized_operator = True
+            res = await db.execute(stmt)
+            if res.scalars().first():
+                is_authorized_operator = True
 
     if not (is_owner or is_admin or is_authorized_operator):
         raise PrivPrintException(

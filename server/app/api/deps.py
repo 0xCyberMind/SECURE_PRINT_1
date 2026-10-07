@@ -78,9 +78,14 @@ async def get_principal_from_token_str(token: str, db: AsyncSession) -> AuthPrin
     elif server_role == UserRole.PRINT_DEVICE:
         device_repo = DeviceRepository(db)
         dev = await device_repo.get_by_id(user.id)
-        if dev:
-            device_id = dev.id
-            shop_id = dev.shop_id
+        if not dev or not dev.is_active:
+            raise PrivPrintException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                code=ErrorCode.AUTH_INVALID,
+                message="Print device is unauthenticated or inactive"
+            )
+        device_id = dev.id
+        shop_id = dev.shop_id
 
     return AuthPrincipal(
         user=user,
@@ -88,6 +93,7 @@ async def get_principal_from_token_str(token: str, db: AsyncSession) -> AuthPrin
         shop_id=shop_id,
         device_id=device_id
     )
+
 
 
 async def get_current_user(

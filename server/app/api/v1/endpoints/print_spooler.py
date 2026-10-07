@@ -20,20 +20,36 @@ async def get_print_queue(
     db: AsyncSession = Depends(get_db_session),
     principal: AuthPrincipal = Depends(require_roles([UserRole.SHOP_OPERATOR, UserRole.PRINT_DEVICE, UserRole.ADMIN]))
 ) -> List[JobResponse]:
-    target_shop = shop_id or principal.shop_id
-    if not target_shop and principal.role != UserRole.ADMIN:
-        raise PrivPrintException(
-            status_code=400,
-            code=ErrorCode.VALIDATION_ERROR,
-            message="Shop ID required"
-        )
-    if principal.shop_id and target_shop != principal.shop_id:
-        raise PrivPrintException(
-            status_code=403,
-            code=ErrorCode.FORBIDDEN,
-            message="Access denied to other shop queue"
-        )
-    if principal.role == UserRole.SHOP_OPERATOR:
+    if principal.role == UserRole.ADMIN:
+        target_shop = shop_id or principal.shop_id
+        if not target_shop:
+            raise PrivPrintException(
+                status_code=400,
+                code=ErrorCode.VALIDATION_ERROR,
+                message="Shop ID required"
+            )
+    elif principal.role == UserRole.PRINT_DEVICE:
+        if not principal.shop_id:
+            raise PrivPrintException(
+                status_code=403,
+                code=ErrorCode.FORBIDDEN,
+                message="Print device is not bound to a valid shop"
+            )
+        if shop_id and shop_id != principal.shop_id:
+            raise PrivPrintException(
+                status_code=403,
+                code=ErrorCode.FORBIDDEN,
+                message="Access denied to other shop queue"
+            )
+        target_shop = principal.shop_id
+    elif principal.role == UserRole.SHOP_OPERATOR:
+        target_shop = shop_id or principal.shop_id
+        if not target_shop:
+            raise PrivPrintException(
+                status_code=400,
+                code=ErrorCode.VALIDATION_ERROR,
+                message="Shop ID required"
+            )
         from app.repositories.shop_repo import ShopRepository
         shop_repo = ShopRepository(db)
         shop = await shop_repo.get_by_id(target_shop)
@@ -43,6 +59,12 @@ async def get_print_queue(
                 code=ErrorCode.FORBIDDEN,
                 message="Access denied: operator does not own this shop"
             )
+    else:
+        raise PrivPrintException(
+            status_code=403,
+            code=ErrorCode.FORBIDDEN,
+            message="Access denied"
+        )
 
     job_repo = PrintJobRepository(db)
     jobs = await job_repo.list_by_shop_and_status(target_shop, status=status)
@@ -60,8 +82,14 @@ async def start_printing(
     if not job:
         raise PrivPrintException(status_code=404, code=ErrorCode.NOT_FOUND, message="Job not found")
 
-    if principal.shop_id and job.shop_id != principal.shop_id:
-        raise PrivPrintException(status_code=403, code=ErrorCode.FORBIDDEN, message="Wrong shop: device unauthorized")
+    if principal.role != UserRole.ADMIN:
+        if not principal.shop_id or job.shop_id != principal.shop_id:
+            raise PrivPrintException(status_code=403, code=ErrorCode.FORBIDDEN, message="Wrong shop: device unauthorized")
+        if principal.role == UserRole.SHOP_OPERATOR:
+            from app.repositories.shop_repo import ShopRepository
+            shop = await ShopRepository(db).get_by_id(job.shop_id)
+            if not shop or shop.owner_id != principal.user_id:
+                raise PrivPrintException(status_code=403, code=ErrorCode.FORBIDDEN, message="Access denied: operator does not own this shop")
 
     job_repo.validate_transition(job.status, PrintJobStatus.PRINTING.value)
     job.status = PrintJobStatus.PRINTING.value
@@ -96,8 +124,14 @@ async def update_job_progress(
     if not job:
         raise PrivPrintException(status_code=404, code=ErrorCode.NOT_FOUND, message="Job not found")
 
-    if principal.shop_id and job.shop_id != principal.shop_id:
-        raise PrivPrintException(status_code=403, code=ErrorCode.FORBIDDEN, message="Wrong shop: device unauthorized")
+    if principal.role != UserRole.ADMIN:
+        if not principal.shop_id or job.shop_id != principal.shop_id:
+            raise PrivPrintException(status_code=403, code=ErrorCode.FORBIDDEN, message="Wrong shop: device unauthorized")
+        if principal.role == UserRole.SHOP_OPERATOR:
+            from app.repositories.shop_repo import ShopRepository
+            shop = await ShopRepository(db).get_by_id(job.shop_id)
+            if not shop or shop.owner_id != principal.user_id:
+                raise PrivPrintException(status_code=403, code=ErrorCode.FORBIDDEN, message="Access denied: operator does not own this shop")
 
     updated_job = await job_repo.update_page_progress_atomic(job_id, payload.pages_printed)
     if payload.completed_copies is not None and payload.completed_copies > updated_job.completed_copies:
@@ -137,8 +171,14 @@ async def increment_copy(
     if not job:
         raise PrivPrintException(status_code=404, code=ErrorCode.NOT_FOUND, message="Job not found")
 
-    if principal.shop_id and job.shop_id != principal.shop_id:
-        raise PrivPrintException(status_code=403, code=ErrorCode.FORBIDDEN, message="Wrong shop: device unauthorized")
+    if principal.role != UserRole.ADMIN:
+        if not principal.shop_id or job.shop_id != principal.shop_id:
+            raise PrivPrintException(status_code=403, code=ErrorCode.FORBIDDEN, message="Wrong shop: device unauthorized")
+        if principal.role == UserRole.SHOP_OPERATOR:
+            from app.repositories.shop_repo import ShopRepository
+            shop = await ShopRepository(db).get_by_id(job.shop_id)
+            if not shop or shop.owner_id != principal.user_id:
+                raise PrivPrintException(status_code=403, code=ErrorCode.FORBIDDEN, message="Access denied: operator does not own this shop")
 
     updated_job = await job_repo.increment_copies_atomic(job_id, delta=delta)
     await db.commit()
@@ -157,11 +197,18 @@ async def fail_job(
     if not job:
         raise PrivPrintException(status_code=404, code=ErrorCode.NOT_FOUND, message="Job not found")
 
-    if principal.shop_id and job.shop_id != principal.shop_id:
-        raise PrivPrintException(status_code=403, code=ErrorCode.FORBIDDEN, message="Wrong shop: device unauthorized")
+    if principal.role != UserRole.ADMIN:
+        if not principal.shop_id or job.shop_id != principal.shop_id:
+            raise PrivPrintException(status_code=403, code=ErrorCode.FORBIDDEN, message="Wrong shop: device unauthorized")
+        if principal.role == UserRole.SHOP_OPERATOR:
+            from app.repositories.shop_repo import ShopRepository
+            shop = await ShopRepository(db).get_by_id(job.shop_id)
+            if not shop or shop.owner_id != principal.user_id:
+                raise PrivPrintException(status_code=403, code=ErrorCode.FORBIDDEN, message="Access denied: operator does not own this shop")
 
     job_repo.validate_transition(job.status, PrintJobStatus.FAILED.value)
     job.status = PrintJobStatus.FAILED.value
     job.failure_reason = reason
     await db.commit()
     return JobResponse.model_validate(job)
+

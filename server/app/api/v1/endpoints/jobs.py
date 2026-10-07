@@ -60,7 +60,7 @@ async def create_job(
             code=ErrorCode.NOT_FOUND,
             message=f"Session {payload.session_id} not found"
         )
-    if session.user_id and session.user_id != principal.user_id:
+    if not session.user_id or session.user_id != principal.user_id:
         raise PrivPrintException(
             status_code=status.HTTP_403_FORBIDDEN,
             code=ErrorCode.FORBIDDEN,
@@ -77,20 +77,33 @@ async def create_job(
             message="Session has expired"
         )
 
-    # 3. Validate Shop Matching
-    if payload.shop_id != session.shop_id:
+    # 3. Authoritative Shop Derivation & Validation
+    target_shop_id = session.shop_id
+    if payload.shop_id and payload.shop_id != target_shop_id:
         raise PrivPrintException(
             status_code=status.HTTP_400_BAD_REQUEST,
             code=ErrorCode.VALIDATION_ERROR,
-            message=f"Shop mismatch: session is bound to shop {session.shop_id}, not {payload.shop_id}"
+            message=f"Shop mismatch: session is bound to shop {target_shop_id}, not {payload.shop_id}"
         )
-    shop = await shop_repo.get_by_id(payload.shop_id)
+    shop = await shop_repo.get_by_id(target_shop_id)
     if not shop or shop.status != "ACTIVE":
         raise PrivPrintException(
             status_code=status.HTTP_400_BAD_REQUEST,
             code=ErrorCode.VALIDATION_ERROR,
             message="Target shop is not active or verified"
         )
+
+    # Validate Printer belongs to session shop
+    if payload.printer_id:
+        from app.repositories.shop_repo import PrinterRepository
+        printer_repo = PrinterRepository(db)
+        printer = await printer_repo.get_by_id(payload.printer_id)
+        if printer and printer.shop_id != target_shop_id:
+            raise PrivPrintException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code=ErrorCode.VALIDATION_ERROR,
+                message=f"Printer {payload.printer_id} does not belong to shop {target_shop_id}"
+            )
 
     # 4. Validate Document Ownership & Copies Limit
     doc = await doc_repo.get_by_id(payload.document_id)
@@ -120,7 +133,7 @@ async def create_job(
     job = await job_repo.create(
         id=job_id,
         user_id=principal.user_id,
-        shop_id=payload.shop_id,
+        shop_id=target_shop_id,
         session_id=session.id,
         document_id=doc.id,
         printer_id=payload.printer_id,
@@ -141,6 +154,7 @@ async def create_job(
         expires_at=session.expires_at
     )
     await db.commit()
+
 
     # Redis Pub/Sub: broadcast job created event across channels
     redis_service = get_redis_service()
@@ -187,7 +201,7 @@ async def create_batch_jobs(
             code=ErrorCode.NOT_FOUND,
             message=f"Session {payload.session_id} not found"
         )
-    if session.user_id and session.user_id != principal.user_id:
+    if not session.user_id or session.user_id != principal.user_id:
         raise PrivPrintException(
             status_code=status.HTTP_403_FORBIDDEN,
             code=ErrorCode.FORBIDDEN,
@@ -203,20 +217,33 @@ async def create_batch_jobs(
             message="Session has expired"
         )
 
-    # 2. Validate Shop
-    if payload.shop_id != session.shop_id:
+    # 2. Authoritative Shop Derivation & Validation
+    target_shop_id = session.shop_id
+    if payload.shop_id and payload.shop_id != target_shop_id:
         raise PrivPrintException(
             status_code=status.HTTP_400_BAD_REQUEST,
             code=ErrorCode.VALIDATION_ERROR,
-            message=f"Shop mismatch: session is bound to shop {session.shop_id}, not {payload.shop_id}"
+            message=f"Shop mismatch: session is bound to shop {target_shop_id}, not {payload.shop_id}"
         )
-    shop = await shop_repo.get_by_id(payload.shop_id)
+    shop = await shop_repo.get_by_id(target_shop_id)
     if not shop or shop.status != "ACTIVE":
         raise PrivPrintException(
             status_code=status.HTTP_400_BAD_REQUEST,
             code=ErrorCode.VALIDATION_ERROR,
             message="Target shop is not active or verified"
         )
+
+    # Validate Printer belongs to session shop
+    if payload.printer_id:
+        from app.repositories.shop_repo import PrinterRepository
+        printer_repo = PrinterRepository(db)
+        printer = await printer_repo.get_by_id(payload.printer_id)
+        if printer and printer.shop_id != target_shop_id:
+            raise PrivPrintException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code=ErrorCode.VALIDATION_ERROR,
+                message=f"Printer {payload.printer_id} does not belong to shop {target_shop_id}"
+            )
 
     # 3. Create all batch jobs
     batch_id = payload.batch_id or f"BAT-{uuid.uuid4().hex[:8].upper()}"
@@ -249,7 +276,7 @@ async def create_batch_jobs(
         job = await job_repo.create(
             id=job_id,
             user_id=principal.user_id,
-            shop_id=payload.shop_id,
+            shop_id=target_shop_id,
             session_id=session.id,
             document_id=doc.id,
             printer_id=payload.printer_id,
@@ -320,12 +347,20 @@ async def get_batch_jobs(
                 message="Access denied: you do not own this batch"
             )
     elif principal.role in [UserRole.SHOP_OPERATOR, UserRole.PRINT_DEVICE]:
-        if principal.shop_id and sample_job.shop_id != principal.shop_id:
+        if not principal.shop_id or sample_job.shop_id != principal.shop_id:
             raise PrivPrintException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 code=ErrorCode.FORBIDDEN,
                 message="Access denied: batch belongs to another shop"
             )
+        if principal.role == UserRole.SHOP_OPERATOR:
+            shop = await ShopRepository(db).get_by_id(sample_job.shop_id)
+            if not shop or shop.owner_id != principal.user_id:
+                raise PrivPrintException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code=ErrorCode.FORBIDDEN,
+                    message="Access denied: operator does not own this shop"
+                )
 
     return BatchJobResponse(
         batch_id=batch_id,
@@ -359,12 +394,20 @@ async def get_job(
                 message="Access denied: you do not own this print job"
             )
     elif principal.role in [UserRole.SHOP_OPERATOR, UserRole.PRINT_DEVICE]:
-        if principal.shop_id and job.shop_id != principal.shop_id:
+        if not principal.shop_id or job.shop_id != principal.shop_id:
             raise PrivPrintException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 code=ErrorCode.FORBIDDEN,
                 message="Access denied: job belongs to another shop"
             )
+        if principal.role == UserRole.SHOP_OPERATOR:
+            shop = await ShopRepository(db).get_by_id(job.shop_id)
+            if not shop or shop.owner_id != principal.user_id:
+                raise PrivPrintException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code=ErrorCode.FORBIDDEN,
+                    message="Access denied: operator does not own this shop"
+                )
 
     # Check for expiration transition
     now_utc = datetime.now(timezone.utc)
@@ -402,12 +445,20 @@ async def authorize_job(
                 message="Access denied: cannot authorize another user's job"
             )
     elif principal.role in [UserRole.SHOP_OPERATOR, UserRole.PRINT_DEVICE]:
-        if principal.shop_id and job.shop_id != principal.shop_id:
+        if not principal.shop_id or job.shop_id != principal.shop_id:
             raise PrivPrintException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 code=ErrorCode.FORBIDDEN,
                 message="Access denied: job belongs to another shop"
             )
+        if principal.role == UserRole.SHOP_OPERATOR:
+            shop = await ShopRepository(db).get_by_id(job.shop_id)
+            if not shop or shop.owner_id != principal.user_id:
+                raise PrivPrintException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code=ErrorCode.FORBIDDEN,
+                    message="Access denied: operator does not own this shop"
+                )
 
     # Expiration check
     now_utc = datetime.now(timezone.utc)
@@ -429,6 +480,14 @@ async def authorize_job(
     job_repo.validate_transition(job.status, PrintJobStatus.AUTHORIZED.value)
 
     if payload and payload.printer_id:
+        from app.repositories.shop_repo import PrinterRepository
+        printer = await PrinterRepository(db).get_by_id(payload.printer_id)
+        if printer and printer.shop_id != job.shop_id:
+            raise PrivPrintException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code=ErrorCode.VALIDATION_ERROR,
+                message=f"Printer {payload.printer_id} does not belong to job's shop {job.shop_id}"
+            )
         job.printer_id = payload.printer_id
 
     job.status = PrintJobStatus.AUTHORIZED.value
@@ -470,12 +529,21 @@ async def cancel_job(
                 message="Access denied: cannot cancel another user's job"
             )
     elif principal.role in [UserRole.SHOP_OPERATOR, UserRole.PRINT_DEVICE]:
-        if principal.shop_id and job.shop_id != principal.shop_id:
+        if not principal.shop_id or job.shop_id != principal.shop_id:
             raise PrivPrintException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 code=ErrorCode.FORBIDDEN,
                 message="Access denied: job belongs to another shop"
             )
+        if principal.role == UserRole.SHOP_OPERATOR:
+            shop = await ShopRepository(db).get_by_id(job.shop_id)
+            if not shop or shop.owner_id != principal.user_id:
+                raise PrivPrintException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code=ErrorCode.FORBIDDEN,
+                    message="Access denied: operator does not own this shop"
+                )
+
 
     # Idempotent return if already CANCELLED
     if job.status == PrintJobStatus.CANCELLED.value:

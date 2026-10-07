@@ -50,8 +50,8 @@ async def authorize_subscription(
         return principal.user_id == target_id
 
     elif prefix == "shop":
-        if principal.shop_id == target_id:
-            return True
+        if principal.role == UserRole.PRINT_DEVICE.value:
+            return principal.shop_id is not None and principal.shop_id == target_id
         if principal.role == UserRole.SHOP_OPERATOR.value:
             shop_repo = ShopRepository(db)
             shop = await shop_repo.get_by_id(target_id)
@@ -64,22 +64,29 @@ async def authorize_subscription(
         if not job:
             return False
         # Owner user check
-        if job.user_id == principal.user_id:
-            return True
-        # Shop operator or assigned device check
-        if principal.shop_id and job.shop_id == principal.shop_id:
-            return True
+        if principal.role == UserRole.USER.value:
+            return job.user_id == principal.user_id
+        # Assigned device check
+        if principal.role == UserRole.PRINT_DEVICE.value:
+            return principal.shop_id is not None and job.shop_id == principal.shop_id
+        # Shop operator check
+        if principal.role == UserRole.SHOP_OPERATOR.value:
+            shop_repo = ShopRepository(db)
+            shop = await shop_repo.get_by_id(job.shop_id)
+            return shop is not None and shop.owner_id == principal.user_id
         return False
 
     elif prefix == "device":
-        if principal.device_id == target_id:
-            return True
-        device_repo = DeviceRepository(db)
-        device = await device_repo.get_by_id(target_id)
-        if not device:
-            return False
-        if principal.shop_id and device.shop_id == principal.shop_id:
-            return True
+        if principal.role == UserRole.PRINT_DEVICE.value:
+            return principal.device_id is not None and principal.device_id == target_id
+        if principal.role == UserRole.SHOP_OPERATOR.value:
+            device_repo = DeviceRepository(db)
+            device = await device_repo.get_by_id(target_id)
+            if not device:
+                return False
+            shop_repo = ShopRepository(db)
+            shop = await shop_repo.get_by_id(device.shop_id)
+            return shop is not None and shop.owner_id == principal.user_id
         return False
 
     return False

@@ -37,20 +37,30 @@ async def execute_job_cleanup(
         )
 
     # Authorization verification
-    if principal.role == UserRole.USER:
-        if job.user_id != principal.user_id:
-            raise PrivPrintException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                code=ErrorCode.FORBIDDEN,
-                message="Cannot execute cleanup on another user's job"
-            )
-    elif principal.role in [UserRole.SHOP_OPERATOR, UserRole.PRINT_DEVICE]:
-        if principal.shop_id and job.shop_id != principal.shop_id:
-            raise PrivPrintException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                code=ErrorCode.FORBIDDEN,
-                message="Cannot execute cleanup for another shop's job"
-            )
+    if principal.role != UserRole.ADMIN:
+        if principal.role == UserRole.USER:
+            if job.user_id != principal.user_id:
+                raise PrivPrintException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code=ErrorCode.FORBIDDEN,
+                    message="Cannot execute cleanup on another user's job"
+                )
+        elif principal.role in [UserRole.SHOP_OPERATOR, UserRole.PRINT_DEVICE]:
+            if not principal.shop_id or job.shop_id != principal.shop_id:
+                raise PrivPrintException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code=ErrorCode.FORBIDDEN,
+                    message="Cannot execute cleanup for another shop's job"
+                )
+            if principal.role == UserRole.SHOP_OPERATOR:
+                from app.repositories.shop_repo import ShopRepository
+                shop = await ShopRepository(db).get_by_id(job.shop_id)
+                if not shop or shop.owner_id != principal.user_id:
+                    raise PrivPrintException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        code=ErrorCode.FORBIDDEN,
+                        message="Access denied: operator does not own this shop"
+                    )
 
     client_ip = request.client.host if request.client else None
     cleanup_service = DocumentCleanupService(db)
@@ -78,12 +88,20 @@ async def execute_document_cleanup(
             message=f"Document {document_id} not found"
         )
 
-    if principal.role == UserRole.USER and doc.user_id != principal.user_id:
-        raise PrivPrintException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            code=ErrorCode.FORBIDDEN,
-            message="Cannot delete another user's document"
-        )
+    if principal.role != UserRole.ADMIN:
+        if principal.role == UserRole.USER:
+            if doc.user_id != principal.user_id:
+                raise PrivPrintException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code=ErrorCode.FORBIDDEN,
+                    message="Cannot delete another user's document"
+                )
+        else:
+            raise PrivPrintException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                code=ErrorCode.FORBIDDEN,
+                message="Only document owner or admin can directly shred documents"
+            )
 
     client_ip = request.client.host if request.client else None
     cleanup_service = DocumentCleanupService(db)
@@ -114,12 +132,38 @@ async def get_document_cleanup_status(
             message=f"Document {document_id} not found"
         )
 
-    if principal.role == UserRole.USER and doc.user_id != principal.user_id:
-        raise PrivPrintException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            code=ErrorCode.FORBIDDEN,
-            message="Access denied to document status"
-        )
+    if principal.role != UserRole.ADMIN:
+        if principal.role == UserRole.USER:
+            if doc.user_id != principal.user_id:
+                raise PrivPrintException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code=ErrorCode.FORBIDDEN,
+                    message="Access denied to document status"
+                )
+        elif principal.role in [UserRole.SHOP_OPERATOR, UserRole.PRINT_DEVICE]:
+            if not principal.shop_id:
+                raise PrivPrintException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code=ErrorCode.FORBIDDEN,
+                    message="Access denied to document status"
+                )
+            job_stmt = select(PrintJob).where(PrintJob.document_id == document_id, PrintJob.shop_id == principal.shop_id)
+            res = await db.execute(job_stmt)
+            if not res.scalars().first():
+                raise PrivPrintException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code=ErrorCode.FORBIDDEN,
+                    message="Access denied to document status"
+                )
+            if principal.role == UserRole.SHOP_OPERATOR:
+                from app.repositories.shop_repo import ShopRepository
+                shop = await ShopRepository(db).get_by_id(principal.shop_id)
+                if not shop or shop.owner_id != principal.user_id:
+                    raise PrivPrintException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        code=ErrorCode.FORBIDDEN,
+                        message="Access denied to document status"
+                    )
 
     cleanup_service = DocumentCleanupService(db)
     return await cleanup_service.get_document_status(document_id=document_id)

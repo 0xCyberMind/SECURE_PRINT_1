@@ -86,12 +86,23 @@ async def sync_shop_printers(
     """
     Syncs discovered local Windows printers reported by Windows Shop Station Agent.
     """
-    if principal.shop_id and principal.shop_id != payload.shop_id and principal.role != UserRole.ADMIN:
-        raise PrivPrintException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            code=ErrorCode.FORBIDDEN,
-            message="Cannot sync printers for another shop"
-        )
+    if principal.role != UserRole.ADMIN:
+        if principal.role == UserRole.PRINT_DEVICE:
+            if not principal.shop_id or principal.shop_id != payload.shop_id:
+                raise PrivPrintException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code=ErrorCode.FORBIDDEN,
+                    message="Cannot sync printers for another shop"
+                )
+        elif principal.role == UserRole.SHOP_OPERATOR:
+            shop_repo = ShopRepository(db)
+            shop_check = await shop_repo.get_by_id(payload.shop_id)
+            if not shop_check or shop_check.owner_id != principal.user_id:
+                raise PrivPrintException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code=ErrorCode.FORBIDDEN,
+                    message="Access denied: operator does not own this shop"
+                )
 
     shop_repo = ShopRepository(db)
     shop = await shop_repo.get_by_id(payload.shop_id)
