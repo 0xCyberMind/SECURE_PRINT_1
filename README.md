@@ -108,9 +108,10 @@ printed; paper output is outside the digital encryption boundary.
   layer. Encryption does not replace secure account, endpoint, or deployment
   configuration.
 
-See [SECURITY.md](SECURITY.md) for the repository's security specification and
-threat-model notes. Review deployment settings and data-retention behavior
-before handling sensitive documents.
+See [SECURITY.md](SECURITY.md) for the security policy, private vulnerability
+reporting instructions, documented security design, and its limitations.
+Review deployment settings and data-retention behavior before handling
+sensitive documents.
 
 ## Repository layout
 
@@ -121,7 +122,7 @@ before handling sensitive documents.
 ├── windows_agent/               Separate Windows worker and printer utilities
 ├── server/                      FastAPI backend, migrations, tests, and Compose
 ├── gradle/                      Gradle wrapper support and dependency catalog
-├── SECURITY.md                  Security specification and threat model
+├── SECURITY.md                  Security policy and vulnerability reporting
 ├── RUN_LOCALLY.md               Local development notes
 └── README.md
 ```

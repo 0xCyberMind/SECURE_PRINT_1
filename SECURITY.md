@@ -1,56 +1,92 @@
-# PrivPrint Security Specification & Threat Model
+# Security Policy
 
-## 1. Cryptographic Primitive Specifications
+PrivPrint is under active development. This document explains which code is
+currently covered by security fixes, how to report a vulnerability privately,
+and the security boundaries described by the project. It is not a security
+certification, an independent audit, or a guarantee that every deployment is
+secure.
 
-| Component | Standard / Algorithm | Details |
-| :--- | :--- | :--- |
-| **Symmetric Cipher** | `AES/GCM/NoPadding` | 256-bit key length, 128-bit authentication tag |
-| **Key Generation** | `KeyGenerator.getInstance("AES")` | Initialized with 256 bits via CSPRNG (`SecureRandom`) |
-| **Initialization Vector** | 96-bit (12 bytes) | Fresh nonces generated using `SecureRandom` per job |
-| **Integrity / Fingerprint** | `SHA-256` | Truncated hexadecimal fingerprint of symmetric key |
-| **Memory Sanitization** | Explicit Zeroization | Decryption keys zeroized (`fill(0)`) upon job completion |
+## Supported Versions
 
----
+No versioned releases are currently listed for this repository. Security
+reports are accepted for the latest code on the `main` branch. Other branches,
+forks, and locally modified builds are not covered by a support commitment.
 
-## 2. Trust Boundaries & Data Visibility
+| Version or branch | Security fixes |
+| --- | --- |
+| Latest `main` | Reviewed and addressed as appropriate |
+| Other branches or versions | Not guaranteed |
 
-| Subsystem | Plaintext Document Access | Decryption Key Access | Ciphertext Access | Role Requirement |
-| :--- | :---: | :---: | :---: | :--- |
-| **Customer App** | YES (Local source) | YES (Generated client-side) | YES (Generated) | `USER` |
-| **API Backend / Transit** | NO | NO | YES | Authenticated TLS + Bearer |
-| **Storage (Object / S3)** | NO | NO | YES | Sealed ciphertext only |
-| **Shop Terminal UI** | NO | NO | YES (Metadata only) | `SHOP_OPERATOR` |
-| **Print Daemon / Spooler** | YES (During rasterization) | Ephemeral (Held in memory only) | YES | `PRINT_DEVICE` |
-| **Laser Drum / Output** | Physical Paper | N/A | N/A | Physical custody |
+## Reporting a Vulnerability
 
----
+Please do not disclose suspected vulnerabilities in public GitHub issues,
+discussions, pull requests, or commit messages.
 
-## 3. Threat Model & Mitigations
+Use GitHub's private vulnerability reporting feature from the repository's
+**Security** tab by selecting **Report a vulnerability**. This creates a
+private report for the repository maintainers. If the private reporting option
+is unavailable, contact the repository maintainers through a private GitHub
+channel and ask for a secure way to submit the details. Do not post sensitive
+information publicly while arranging a report.
 
-### Threat A: Document Snooping / WhatsApp Archival
-* **Risk**: When customers send PDFs via WhatsApp/Telegram to Xerox shop staff, files remain in "Media Received" galleries, cloud backups, and local hard drives indefinitely.
-* **PrivPrint Mitigation**: Documents are encrypted client-side with AES-256-GCM. Decryption keys are never stored on persistent storage. The payload resides strictly in volatile memory.
+When possible, include:
 
-### Threat B: Unauthorized Extra Copies ("Rogue Print Run")
-* **Risk**: A shop operator or compromised terminal attempts to print extra copies of a confidential document (e.g. contracts, diplomas, bank statements).
-* **PrivPrint Mitigation**: Atomic SQLite transactions (`@Transaction`) enforce copy caps with concurrency protection. Every copy attempt increments the counter; if `copiesPrinted >= copiesAuthorized`, the query returns `CopyIncrementResult.LimitReached` and rejects spooling. 10 concurrent requests for 2 copies will allow exactly 2 and reject 8.
+- A concise description of the issue and its potential impact.
+- The affected component, branch or commit, and relevant configuration.
+- Clear reproduction steps and a minimal, non-destructive proof of concept.
+- Any mitigations or workarounds you have identified.
 
-### Threat C: In-Transit Interception
-* **Risk**: Man-in-the-middle sniffing on shop Wi-Fi or public network.
-* **PrivPrint Mitigation**: Authenticated GCM encryption guarantees both confidentiality and ciphertext integrity. Tampered payloads fail decryption with an AEAD tag mismatch.
+Please redact credentials, access tokens, private keys, personal information,
+and real customer documents from reports, logs, screenshots, and proof-of-
+concept files. Do not access, modify, or retain data that is not yours while
+investigating a suspected issue.
 
-### Threat D: Long-Lived Session Hijacking
-* **Risk**: A customer leaves the shop but their connection remains open.
-* **PrivPrint Mitigation**: Every paired session is bound to a strict 15-minute Time-To-Live (TTL). Once expired, session tokens are invalidated and discarded. Customers also have an **Emergency Revoke** button to terminate transmission immediately.
+The maintainers will review reports, assess impact, and coordinate any fix and
+disclosure with the reporter as appropriate. Response and remediation times
+depend on severity, reproducibility, and maintainer availability; no response
+or remediation service level is guaranteed. Reporter credit can be included
+with permission.
 
-### Threat E: Premature Storage Shredding Claim
-* **Risk**: Storage deletion fails silently on the backend while the client is falsely notified that data was destroyed.
-* **PrivPrint Mitigation**: The `VerifiedCleanupEngine` mandates two-phase verified deletion (`CLEANUP_PENDING` → `CLEANUP_RETRY` → `CLEANUP_COMPLETED`). Deletion is actively confirmed against the storage subsystem before audit events and status reflect completion.
+## Scope
 
----
+Reports are welcome for security weaknesses in PrivPrint code and repository
+configuration, including:
 
-## 4. Honest Security Boundary
+- The Android customer application.
+- The Windows shop-station application and print agent.
+- The backend API and its authentication, authorization, and document-job
+  handling.
+- Repository-provided deployment, build, and configuration files where an
+  issue creates a security impact for PrivPrint users or operators.
 
-1. **Decryption at Print Boundary**: PrivPrint provides authenticated end-to-end encryption from customer phone to the authorized print spooler. Because physical printers require rasterized or PostScript/PDF data to deposit toner on paper, decryption necessarily takes place within the trusted print device environment.
-2. **Volatile Memory**: While sensitive byte arrays are explicitly filled with zeros (`keyBytes.fill(0)`), JVM garbage collection timing means total memory wipe cannot be guaranteed at the kernel level without native C/Rust secure memory allocators (`mlock`). PrivPrint implements best-effort secure memory wiping for the Android platform.
-3. **Physical Custody**: Once sheets exit the output tray, physical security controls (shredding discarded drafts, collecting prints promptly) govern physical access.
+Issues that exist only in a third-party service or a specific operator's
+infrastructure should be reported to that service provider or operator.
+Deployment-specific weaknesses may still be in scope when they are caused by
+PrivPrint code or repository-provided configuration.
+
+## Documented Security Design and Boundaries
+
+The project documentation describes the following design:
+
+- The Android client encrypts document content with AES-256-GCM using a
+  12-byte nonce and a 128-bit authentication tag. It wraps the document key
+  for a registered station using RSA-OAEP with SHA-256.
+- The backend and configured object storage handle encrypted document content.
+  The authorized Windows station decrypts a job in memory so it can be rendered
+  and printed.
+- Production client/API traffic is intended to use HTTPS and WSS. Windows
+  station credentials are protected with Windows DPAPI for the signed-in user.
+
+These are descriptions of the intended/documented application design, not
+claims of independent verification. Encryption does not by itself secure
+accounts, endpoints, deployment configuration, backups, or third-party
+services. Application-level buffer clearing cannot guarantee erasure from the
+runtime, operating system, storage provider, or printer. Printed pages are
+outside the digital encryption boundary and require appropriate physical
+handling.
+
+Operators should keep secrets in an appropriate secret store, use separate
+credentials for each environment, restrict access to production systems, and
+review retention, backup, and cleanup behavior for their deployment. Never
+commit populated environment files, credentials, access tokens, private keys,
+or real customer documents.
