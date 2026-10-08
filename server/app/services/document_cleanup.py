@@ -11,7 +11,8 @@ async def run() -> None:
     while True:
         try:
             async with AsyncSessionLocal() as db:
-                result = await DocumentCleanupService(db).run_cleanup_sweep()
+                cleanup_svc = DocumentCleanupService(db)
+                result = await cleanup_svc.run_cleanup_sweep()
                 await db.commit()
                 logger.info(
                     "Cleanup sweep completed: scanned=%s shredded=%s retained=%s failed=%s",
@@ -19,6 +20,15 @@ async def run() -> None:
                     result.shredded_documents,
                     result.retained_documents,
                     result.failed_documents,
+                )
+
+                history_result = await cleanup_svc.run_history_cleanup_sweep()
+                await db.commit()
+                logger.info(
+                    "History retention sweep completed: scanned=%s deleted=%s retained=%s",
+                    history_result.total_scanned_jobs,
+                    history_result.total_deleted_jobs,
+                    history_result.total_retained_jobs,
                 )
         except Exception:
             logger.exception("Cleanup sweep failed; retrying on the next interval")

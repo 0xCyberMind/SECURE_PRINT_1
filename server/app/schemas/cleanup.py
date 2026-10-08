@@ -37,3 +37,21 @@ class CleanupSweepResponse(BaseModel):
     retained_documents: int
     failed_documents: int
     details: List[CleanupResponse]
+
+
+class HistoryCleanupResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    shop_id: str
+    deleted_job_ids: List[str]
+    deleted_count: int
+    retained_count: int
+    retention_hours: int
+    cleaned_at: datetime
+
+
+class HistoryCleanupSweepResponse(BaseModel):
+    total_scanned_jobs: int
+    total_deleted_jobs: int
+    total_retained_jobs: int
+    details_by_shop: Dict[str, HistoryCleanupResponse]

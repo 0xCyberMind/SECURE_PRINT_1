@@ -54,8 +54,8 @@ import com.example.privprint.data.model.PrintJobStatus
 // -------------------------------------------------------------
 // Consistent Elevation & Shape Design Tokens
 // -------------------------------------------------------------
-val CornerRadiusCard = 14.dp
-val CornerRadiusButton = 12.dp
+val CornerRadiusCard = 16.dp
+val CornerRadiusButton = 14.dp
 val CornerRadiusSmall = 8.dp
 val CornerRadiusPill = 24.dp
 
@@ -111,8 +111,9 @@ fun PrivPrintPrimaryButton(
             disabledContainerColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
             disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
         ),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
         modifier = modifier
+            .fillMaxWidth()
             .heightIn(min = 52.dp)
             .then(if (testTag != null) Modifier.testTag(testTag) else Modifier)
     ) {
@@ -135,7 +136,7 @@ fun PrivPrintPrimaryButton(
             text = text,
             style = MaterialTheme.typography.labelLarge.copy(
                 fontWeight = FontWeight.SemiBold,
-                fontSize = 15.sp
+                fontSize = 16.sp
             )
         )
     }
@@ -157,13 +158,15 @@ fun PrivPrintOutlinedButton(
         onClick = onClick,
         enabled = enabled,
         shape = RoundedCornerShape(CornerRadiusButton),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.7f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
         colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = Color.Transparent,
             contentColor = MaterialTheme.colorScheme.onSurface
         ),
-        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
         modifier = modifier
-            .heightIn(min = 48.dp)
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
             .then(if (testTag != null) Modifier.testTag(testTag) else Modifier)
     ) {
         if (icon != null) {
@@ -178,7 +181,7 @@ fun PrivPrintOutlinedButton(
             text = text,
             style = MaterialTheme.typography.labelLarge.copy(
                 fontWeight = FontWeight.SemiBold,
-                fontSize = 14.sp
+                fontSize = 16.sp
             )
         )
     }
@@ -232,14 +235,14 @@ fun PrivPrintStatusBadge(
 
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(CornerRadiusSmall))
+            .clip(RoundedCornerShape(CornerRadiusPill))
             .background(bgColor)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = 10.dp, vertical = 4.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
             color = textColor
         )

@@ -273,3 +273,23 @@ class WindowsAgentApiClient:
             self.config.access_token = self.access_token
             self.config.refresh_token = self.refresh_token
             return data
+
+    async def update_shop_location(
+        self,
+        shop_id: str,
+        latitude: float,
+        longitude: float,
+        address: Optional[str] = None
+    ) -> Dict[str, Any]:
+        url = f"{self.base_url}/api/v1/shops/{shop_id}/location"
+        payload: Dict[str, Any] = {
+            "latitude": latitude,
+            "longitude": longitude
+        }
+        if address:
+            payload["address"] = address
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            res = await client.put(url, json=payload, headers=self._headers())
+            self._raise_for_response(res)
+            return res.json()
+

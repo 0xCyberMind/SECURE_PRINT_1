@@ -67,15 +67,14 @@ object PrivPrintLocationHelper {
                 else -> networkLastKnown
             }
 
-            if (bestLastKnown != null && (System.currentTimeMillis() - bestLastKnown.time) < 10 * 60 * 1000) {
+            if (bestLastKnown != null && (System.currentTimeMillis() - bestLastKnown.time) < 30 * 60 * 1000) {
                 onLocationReceived(bestLastKnown)
                 return
             }
 
-            // Otherwise request single location update
             val provider = when {
-                locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
                 locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
+                locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
                 else -> null
             }
 
@@ -98,6 +97,15 @@ object PrivPrintLocationHelper {
                 override fun onProviderEnabled(provider: String) {}
                 override fun onProviderDisabled(provider: String) {}
             }
+
+            // Safety timeout to avoid hanging indoors if GPS lock is delayed
+            android.os.Handler(Looper.getMainLooper()).postDelayed({
+                if (!delivered) {
+                    delivered = true
+                    try { locationManager.removeUpdates(listener) } catch (e: Exception) {}
+                    onLocationReceived(bestLastKnown)
+                }
+            }, 4000L)
 
             locationManager.requestSingleUpdate(provider, listener, Looper.getMainLooper())
 

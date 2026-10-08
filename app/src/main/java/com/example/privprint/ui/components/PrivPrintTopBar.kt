@@ -114,7 +114,7 @@ fun PrivPrintTopBar(
                                 .padding(horizontal = 5.dp, vertical = 1.5.dp)
                         ) {
                             Text(
-                                text = "E2EE",
+                                text = "Secure",
                                 color = Color(0xFF047857),
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold
@@ -122,11 +122,7 @@ fun PrivPrintTopBar(
                         }
                     }
                     Text(
-                        text = if (currentMode == AppMode.USER) {
-                            currentUser?.let { "Customer account" } ?: "Secure Print Client"
-                        } else {
-                            currentShopAuth?.let { "Shop operator • Terminal" } ?: "Shop Operator Terminal"
-                        },
+                        text = currentUser?.let { "Customer account" } ?: "Secure printing",
                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -166,29 +162,17 @@ fun PrivPrintTopBar(
                         modifier = Modifier
                             .size(36.dp)
                             .clip(CircleShape)
-                            .background(
-                                if (currentMode == AppMode.USER) MaterialTheme.colorScheme.primaryContainer
-                                else MaterialTheme.colorScheme.secondaryContainer
-                            )
+                            .background(MaterialTheme.colorScheme.primaryContainer)
                             .clickable { showAccountMenu = true },
                         contentAlignment = Alignment.Center
                     ) {
-                        if (currentMode == AppMode.USER) {
-                            val initial = currentUser?.name?.firstOrNull()?.uppercase() ?: "U"
-                            Text(
-                                text = initial,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.Storefront,
-                                contentDescription = "Shop Terminal",
-                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
+                        val initial = currentUser?.name?.firstOrNull()?.uppercase() ?: "U"
+                        Text(
+                            text = initial,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
                     }
 
                     DropdownMenu(
@@ -196,123 +180,15 @@ fun PrivPrintTopBar(
                         onDismissRequest = { showAccountMenu = false }
                     ) {
                         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                            if (currentMode == AppMode.USER) {
-                                Text(
-                                    text = "Customer account",
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "Mobile: ${maskedPhoneNumber(currentUser?.phoneNumber)}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            } else {
-                                Text(
-                                    text = currentShopAuth?.shopName ?: "Apex Campus Xerox",
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "Shop operator",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = "Phone: ${maskedPhoneNumber(currentShopAuth?.operatorPhone)}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-
-                        HorizontalDivider()
-
-                        // 1. Switch Account / Change Login
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = "Switch Account / Log In",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Default.SwitchAccount,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            },
-                            onClick = {
-                                showAccountMenu = false
-                                onOpenLogin(null)
-                            }
-                        )
-
-                        // 2. Role-specific login shortcut
-                        if (currentMode == AppMode.USER) {
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = "Log In as Xerox Operator",
-                                        fontSize = 13.sp
-                                    )
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Default.Storefront,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.secondary,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                },
-                                onClick = {
-                                    showAccountMenu = false
-                                    onOpenLogin(AppMode.SHOP)
-                                }
+                            Text(
+                                text = "Customer account",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
                             )
-                        } else {
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = "Log In as Customer",
-                                        fontSize = 13.sp
-                                    )
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Default.Person,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                },
-                                onClick = {
-                                    showAccountMenu = false
-                                    onOpenLogin(AppMode.USER)
-                                }
-                            )
-
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = "Switch to Customer Mode",
-                                        fontSize = 13.sp
-                                    )
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Default.Print,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                },
-                                onClick = {
-                                    showAccountMenu = false
-                                    onToggleMode(AppMode.USER)
-                                }
+                            Text(
+                                text = "Mobile: ${maskedPhoneNumber(currentUser?.phoneNumber)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
 

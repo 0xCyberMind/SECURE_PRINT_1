@@ -560,4 +560,31 @@ object StationIcons {
             drawPath(arrow, c, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
         }
     }
+
+    @Composable
+    fun Location(
+        modifier: Modifier = Modifier.size(16.dp),
+        color: Color = Color.Unspecified
+    ) {
+        Canvas(modifier = modifier) {
+            val c = if (color != Color.Unspecified) color else Color.White
+            val w = size.width
+            val h = size.height
+            val sw = w * 0.085f
+
+            // Pin head and tip
+            val path = Path().apply {
+                moveTo(w * 0.5f, h * 0.92f)
+                cubicTo(w * 0.35f, h * 0.70f, w * 0.15f, h * 0.48f, w * 0.15f, h * 0.35f)
+                cubicTo(w * 0.15f, h * 0.16f, w * 0.31f, h * 0.08f, w * 0.5f, h * 0.08f)
+                cubicTo(w * 0.69f, h * 0.08f, w * 0.85f, h * 0.16f, w * 0.85f, h * 0.35f)
+                cubicTo(w * 0.85f, h * 0.48f, w * 0.65f, h * 0.70f, w * 0.5f, h * 0.92f)
+                close()
+            }
+            drawPath(path, c, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+
+            // Inner circle
+            drawCircle(c, radius = w * 0.13f, center = Offset(w * 0.5f, h * 0.35f), style = Stroke(width = sw))
+        }
+    }
 }

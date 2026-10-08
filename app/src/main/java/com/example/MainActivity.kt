@@ -120,14 +120,8 @@ fun PrivPrintApp(viewModel: PrivPrintViewModel) {
 
     // Login Pages - reachable anytime from anywhere
     if (authState == AuthState.LOGGED_OUT) {
-        val initialTab = when {
-            pendingLoginRole == AppMode.SHOP -> 1
-            pendingLoginRole == AppMode.USER -> 0
-            currentMode == AppMode.SHOP -> 1
-            else -> 0
-        }
         AuthScreen(
-            initialTab = initialTab,
+            initialTab = 0,
             canCancel = canCancelLogin,
             onCancel = { viewModel.cancelLogin() },
             onAuthenticateUser = { email, password, fullName, phone, register ->
@@ -140,17 +134,7 @@ fun PrivPrintApp(viewModel: PrivPrintViewModel) {
                     register = register
                 )
             },
-            onAuthenticateShop = { shopName, operatorName, email, password, phone, register ->
-                viewModel.authenticate(
-                    email = email,
-                    password = password,
-                    fullName = operatorName,
-                    phone = phone,
-                    role = com.example.privprint.data.api.models.UserRole.SHOP_OPERATOR,
-                    shopName = shopName,
-                    register = register
-                )
-            },
+            onAuthenticateShop = { _, _, _, _, _, _ -> false },
             loginInProgress = authLoginInProgress,
             loginError = authLoginError,
         )
@@ -167,11 +151,6 @@ fun PrivPrintApp(viewModel: PrivPrintViewModel) {
                         currentScreen = userUiState.currentScreen,
                         onNavigate = { viewModel.navigateToUserScreen(it) }
                     )
-                } else if (currentMode == AppMode.SHOP) {
-                    PrivPrintShopNavigationRail(
-                        currentScreen = shopUiState.currentScreen,
-                        onNavigate = { viewModel.navigateToShopScreen(it) }
-                    )
                 }
             }
 
@@ -182,7 +161,7 @@ fun PrivPrintApp(viewModel: PrivPrintViewModel) {
                         hasActiveSession = activeSession != null && !(activeSession?.isExpired ?: true),
                         currentUser = currentUser,
                         currentShopAuth = currentShopAuth,
-                        onToggleMode = { viewModel.setAppMode(it) },
+                        onToggleMode = { },
                         onOpenLogin = { targetRole ->
                             viewModel.openLogin(targetRole)
                         },
@@ -243,9 +222,7 @@ fun PrivPrintApp(viewModel: PrivPrintViewModel) {
                                     onSelectShop = { shop ->
                                         viewModel.onScanShopQr(shop.permanentQrPayload)
                                     },
-                                    onOpenLogin = { targetRole ->
-                                        viewModel.openLogin(targetRole)
-                                    }
+                                    onOpenLogin = { }
                                 )
 
                                 UserScreen.NEARBY_SHOPS -> NearbyShopsScreen(
@@ -359,11 +336,9 @@ fun PrivPrintApp(viewModel: PrivPrintViewModel) {
                                     environmentMode = environmentMode,
                                     onEnvironmentChange = { viewModel.setEnvironmentMode(it) },
                                     onThemeChange = { viewModel.setThemeMode(it) },
-                                    onSwitchToShopMode = { viewModel.setAppMode(AppMode.SHOP) },
+                                    onSwitchToShopMode = { },
                                     onResetSession = { viewModel.emergencyRevokeSession() },
-                                    onOpenLogin = { targetRole ->
-                                        viewModel.openLogin(targetRole)
-                                    },
+                                    onOpenLogin = { viewModel.openLogin(null) },
                                     onLogout = { viewModel.logout() },
                                     onBack = { viewModel.navigateToUserScreen(UserScreen.HOME) }
                                 )
@@ -371,82 +346,10 @@ fun PrivPrintApp(viewModel: PrivPrintViewModel) {
                         }
 
                         AppMode.SHOP -> {
-                            // Hardware back button support for shop screens
-                            BackHandler(enabled = shopUiState.currentScreen != ShopScreen.DASHBOARD) {
-                                viewModel.navigateToShopScreen(ShopScreen.DASHBOARD)
-                            }
-
-                            val auth = currentShopAuth
-                            val shop = allShops.find { it.id == auth?.shopId } ?: Shop(
-                                id = auth?.shopId ?: "SHOP-101",
-                                name = auth?.shopName ?: "Terminal Station",
-                                address = if (auth != null) "Station Operator: ${auth.operatorName} • ${auth.operatorPhone}" else "Station Not Configured",
-                                permanentQrPayload = Shop.createQrPayload(
-                                    auth?.shopId ?: "SHOP-101",
-                                    auth?.shopName ?: "PrivPrint Station"
-                                )
-                            )
-
-                            when (shopUiState.currentScreen) {
-                                ShopScreen.DASHBOARD -> ShopDashboardScreen(
-                                    currentShop = shop,
-                                    queue = activeQueue,
-                                    printers = allPrinters,
-                                    printProgress = printProgress,
-                                    currentShopAuth = currentShopAuth,
-                                    serverUrl = windowsStationUrl,
-                                    autoPrintEnabled = autoPrintOnAccept,
-                                    onToggleAutoPrint = { viewModel.setAutoPrintOnAccept(it) },
-                                    onAcceptAndPrint = { viewModel.acceptAndDirectPrintJob(it) },
-                                    onNavigate = { viewModel.navigateToShopScreen(it) },
-                                    onPrintNext = { viewModel.startPrintingNextQueueJob() },
-                                    onPrintJob = { viewModel.printSpecificJob(it) },
-                                    onCancelJob = { viewModel.cancelJob(it) },
-                                    onOpenLogin = { targetRole ->
-                                        viewModel.openLogin(targetRole)
-                                    },
-                                    onLogout = { viewModel.logout() }
-                                )
-
-                                ShopScreen.WINDOWS_STATION -> ShopWindowsStationScreen(
-                                    shop = shop,
-                                    serverUrl = windowsStationUrl,
-                                    publicServerUrl = publicStationUrl,
-                                    isPublicTunnelEnabled = isPublicTunnelEnabled,
-                                    onTogglePublicTunnel = { viewModel.setPublicTunnelEnabled(it) },
-                                    printers = allPrinters,
-                                    autoPrintEnabled = autoPrintOnAccept,
-                                    onToggleAutoPrint = { viewModel.setAutoPrintOnAccept(it) },
-                                    onBack = { viewModel.navigateToShopScreen(ShopScreen.DASHBOARD) }
-                                )
-
-                                ShopScreen.PERMANENT_QR -> PermanentQrScreen(
-                                    shop = shop,
-                                    onBack = { viewModel.navigateToShopScreen(ShopScreen.DASHBOARD) }
-                                )
-
-                                ShopScreen.QUEUE -> ShopQueueScreen(
-                                    queue = activeQueue,
-                                    onPrintJob = { viewModel.printSpecificJob(it) },
-                                    onAcceptAndPrint = { viewModel.acceptAndDirectPrintJob(it) },
-                                    onAttemptUnauthorizedCopy = { viewModel.attemptUnauthorizedCopy(it) },
-                                    onCancelJob = { viewModel.cancelJob(it) },
-                                    onBack = { viewModel.navigateToShopScreen(ShopScreen.DASHBOARD) }
-                                )
-
-                                ShopScreen.PRINTERS -> ShopPrintersScreen(
-                                    printers = allPrinters,
-                                    onAddPrinter = { name, model, paper, toner, isDefault ->
-                                        viewModel.savePrinter(name, model, paper, toner, isDefault)
-                                    },
-                                    onDeletePrinter = { viewModel.deletePrinter(it) },
-                                    onBack = { viewModel.navigateToShopScreen(ShopScreen.DASHBOARD) }
-                                )
-
-                                ShopScreen.AUDIT -> ShopAuditScreen(
-                                    auditEvents = auditEvents,
-                                    onBack = { viewModel.navigateToShopScreen(ShopScreen.DASHBOARD) }
-                                )
+                            // Shop operator screens are only available in the Windows application.
+                            // If customer mode somehow enters SHOP, redirect back to USER.
+                            LaunchedEffect(Unit) {
+                                viewModel.setAppMode(AppMode.USER)
                             }
                         }
                     }

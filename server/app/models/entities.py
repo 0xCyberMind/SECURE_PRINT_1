@@ -59,6 +59,11 @@ class Shop(Base, TimestampMixin):
     supports_color = Column(Boolean, default=True, nullable=False)
     supports_duplex = Column(Boolean, default=True, nullable=False)
     permanent_qr_payload = Column(Text, nullable=False)
+    history_retention_hours = Column(Integer, default=4, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("history_retention_hours IN (1, 2, 4, 6, 8)", name="chk_shop_history_retention_range"),
+    )
 
     # Relationships
     devices = relationship("Device", back_populates="shop", cascade="all, delete-orphan")

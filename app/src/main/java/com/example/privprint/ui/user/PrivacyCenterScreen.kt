@@ -177,7 +177,7 @@ fun PrivacyCenterScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "End Session & Delete Data",
+                                    text = "End Session & Clear Data",
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }
@@ -205,18 +205,18 @@ fun PrivacyCenterScreen(
                     ) {
                         PrivacyCommitmentRow(
                             icon = Icons.Default.Lock,
-                            title = "Document Protection",
-                            description = "Your document is protected during transfer and processing."
+                            title = "Protected Documents",
+                            description = "Your documents are encrypted during secure processing."
                         )
                         PrivacyCommitmentRow(
                             icon = Icons.Default.Timer,
-                            title = "Session",
-                            description = "Your print session is temporary."
+                            title = "Temporary Sessions",
+                            description = "Print sessions are designed to be temporary."
                         )
                         PrivacyCommitmentRow(
                             icon = Icons.Default.CleaningServices,
-                            title = "Cleanup",
-                            description = "Temporary print data is removed according to the application's configured retention/cleanup process."
+                            title = "Automatic Cleanup",
+                            description = "Temporary print data is removed according to PrivPrint's configured retention policy."
                         )
                     }
                 }
@@ -224,7 +224,7 @@ fun PrivacyCenterScreen(
 
             // Plain Language Workflow Section: "How PrivPrint protects your document"
             item {
-                PrivPrintSectionHeader(title = "How PrivPrint protects your document")
+                PrivPrintSectionHeader(title = "How It Works")
             }
 
             item {
@@ -235,110 +235,26 @@ fun PrivacyCenterScreen(
                     ) {
                         StepExplanationRow(
                             stepNumber = "1",
-                            title = "Scan Permanent Counter QR",
-                            desc = "You connect to the Xerox shop without signing into public computers or sharing personal email."
+                            title = "Scan",
+                            desc = "Connect to a verified print shop by scanning their QR code."
                         )
                         StepExplanationRow(
                             stepNumber = "2",
-                            title = "Encrypted Transfer",
-                            desc = "The document is encrypted on your device and sent directly to the print service."
+                            title = "Encrypt",
+                            desc = "Your document is encrypted on your device."
                         )
                         StepExplanationRow(
                             stepNumber = "3",
-                            title = "Restricted Print Output",
-                            desc = "Only the exact number of authorized copies can be produced by the printer."
+                            title = "Print",
+                            desc = "The document is securely transferred and printed."
                         )
                         StepExplanationRow(
                             stepNumber = "4",
-                            title = "Automatic Data Removal",
-                            desc = "Temporary documents and keys are shredded once printing finishes or when the session closes."
+                            title = "Cleanup",
+                            desc = "All temporary data is securely cleared."
                         )
                     }
                 }
-            }
-
-            // Live Security Audit Trail Header
-            item {
-                PrivPrintSectionHeader(title = "Security Audit Trail")
-            }
-
-            if (auditEvents.isEmpty()) {
-                item {
-                    PrivPrintCard(modifier = Modifier.fillMaxWidth()) {
-                        PrivPrintEmptyState(
-                            title = "No audit events recorded",
-                            subtitle = "Activity logs will show here during active sessions.",
-                            icon = Icons.Default.Info
-                        )
-                    }
-                }
-            } else {
-                items(auditEvents) { event ->
-                    PrivPrintCard(modifier = Modifier.fillMaxWidth()) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        when (event.severity) {
-                                            AuditSeverity.INFO -> Color(0xFFECFDF5)
-                                            AuditSeverity.WARNING -> Color(0xFFFFFBEB)
-                                            AuditSeverity.SECURITY_ALERT -> Color(0xFFFEF2F2)
-                                        }
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = when (event.severity) {
-                                        AuditSeverity.INFO -> Icons.Outlined.CheckCircle
-                                        AuditSeverity.WARNING -> Icons.Default.Warning
-                                        AuditSeverity.SECURITY_ALERT -> Icons.Default.Shield
-                                    },
-                                    contentDescription = null,
-                                    tint = when (event.severity) {
-                                        AuditSeverity.INFO -> Color(0xFF047857)
-                                        AuditSeverity.WARNING -> Color(0xFFB45309)
-                                        AuditSeverity.SECURITY_ALERT -> Color(0xFFB91C1C)
-                                    },
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        text = event.eventType.title,
-                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = dateFormat.format(Date(event.timestamp)),
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                Text(
-                                    text = PRIVATE_AUDIT_DETAILS_LABEL,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            item {
-                Spacer(modifier = Modifier.height(16.dp))
             }
         }
     }

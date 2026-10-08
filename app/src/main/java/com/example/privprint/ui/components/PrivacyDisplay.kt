@@ -9,4 +9,4 @@ const val PRIVATE_DOCUMENT_LABEL = "Private document"
 const val PRIVATE_AUDIT_DETAILS_LABEL = "Details hidden to protect private data."
 
 fun displayShopAddress(address: String): String =
-    if (address.startsWith("Station Operator:", ignoreCase = true)) "Shop operator station" else address
+    if (address.startsWith("Station Operator:", ignoreCase = true)) "Verified print shop" else address

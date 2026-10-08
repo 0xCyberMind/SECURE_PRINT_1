@@ -31,6 +31,7 @@ class AgentConfig:
     access_token: Optional[str] = None
     refresh_token: Optional[str] = None
     auto_print_enabled: bool = True
+    history_retention_hours: int = 4
     heartbeat_interval_sec: int = 15
     reconnect_delay_sec: int = 5
     log_level: str = "INFO"
@@ -55,6 +56,7 @@ class AgentConfig:
             "shop_id": self.shop_id,
             "device_name": self.device_name,
             "auto_print_enabled": self.auto_print_enabled,
+            "history_retention_hours": self.history_retention_hours,
             "heartbeat_interval_sec": self.heartbeat_interval_sec,
             "reconnect_delay_sec": self.reconnect_delay_sec,
             "log_level": self.log_level

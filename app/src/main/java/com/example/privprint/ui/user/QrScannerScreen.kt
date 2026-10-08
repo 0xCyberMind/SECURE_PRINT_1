@@ -191,7 +191,7 @@ fun QrScannerScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "Scan Shop QR",
+                        text = "Connect to a print shop",
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                     )
                 },
@@ -234,16 +234,9 @@ fun QrScannerScreen(
                 modifier = Modifier.padding(horizontal = 8.dp)
             ) {
                 Text(
-                    text = "Point your camera at the Xerox shop QR code.",
+                    text = "Scan the shop's PrivPrint QR code",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "The shop QR is permanent and can be scanned by any customer.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
                 )
             }
@@ -383,7 +376,10 @@ fun QrScannerScreen(
             }
 
             // Error Notice
-            val displayError = scannerError ?: localDecodeError
+            val displayError = when {
+                scannerError?.contains("429") == true || scannerError?.contains("retry") == true -> "Too many attempts. Please wait a moment and try again."
+                else -> scannerError ?: localDecodeError
+            }
             if (displayError != null) {
                 PrivPrintErrorState(
                     title = "Scan error",
@@ -398,7 +394,7 @@ fun QrScannerScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 PrivPrintOutlinedButton(
-                    text = "Upload QR Image",
+                    text = "Scan from photo",
                     icon = Icons.Default.Image,
                     onClick = {
                         photoPickerLauncher.launch(
@@ -420,7 +416,7 @@ fun QrScannerScreen(
             PrivPrintCard(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "Enter Shop ID Manually",
+                        text = "Enter shop code manually",
                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -433,7 +429,7 @@ fun QrScannerScreen(
                         OutlinedTextField(
                             value = manualCodeInput,
                             onValueChange = onManualCodeChange,
-                            placeholder = { Text("Enter the shop ID shown with its QR code", fontSize = 13.sp) },
+                            placeholder = { Text("Enter shop code", fontSize = 13.sp) },
                             singleLine = true,
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier

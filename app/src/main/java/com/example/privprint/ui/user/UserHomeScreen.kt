@@ -100,33 +100,21 @@ fun UserHomeScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
+                        val currentHour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+                        val greeting = when (currentHour) {
+                            in 0..11 -> "Good morning 👋"
+                            in 12..16 -> "Good afternoon 👋"
+                            else -> "Good evening 👋"
+                        }
                         Text(
-                            text = "Welcome back 👋",
+                            text = greeting,
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onBackground
                         )
                         Text(
-                            text = "Mobile: ${maskedPhoneNumber(currentUser.phoneNumber)} • End-to-End Encrypted",
+                            text = "Your documents stay protected.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    TextButton(
-                        onClick = { onOpenLogin(null) }
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.SwitchAccount,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Switch Login",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
@@ -167,7 +155,7 @@ fun UserHomeScreen(
                         .padding(20.dp)
                 ) {
                     Text(
-                        text = "Cloud-Connected Printing",
+                        text = "Secure Printing",
                         style = MaterialTheme.typography.headlineMedium.copy(
                             fontWeight = FontWeight.Bold,
                             letterSpacing = (-0.5).sp
@@ -176,15 +164,15 @@ fun UserHomeScreen(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Scan counter QR or find nearby registered Xerox print hubs.",
+                        text = "Print your documents at a nearby PrivPrint shop.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(18.dp))
 
-                    Row(
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Button(
                             onClick = { onNavigate(UserScreen.QR_SCANNER) },
@@ -194,7 +182,7 @@ fun UserHomeScreen(
                                 contentColor = MaterialTheme.colorScheme.onPrimary
                             ),
                             modifier = Modifier
-                                .weight(1f)
+                                .fillMaxWidth()
                                 .height(52.dp)
                                 .testTag("scan_xerox_qr_button")
                         ) {
@@ -205,14 +193,14 @@ fun UserHomeScreen(
                                 Icon(
                                     imageVector = Icons.Default.QrCodeScanner,
                                     contentDescription = "Scan QR",
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(20.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Scan QR",
+                                    text = "Scan Shop QR",
                                     style = MaterialTheme.typography.labelLarge.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 14.sp
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 15.sp
                                     )
                                 )
                             }
@@ -222,8 +210,8 @@ fun UserHomeScreen(
                             onClick = { onNavigate(UserScreen.NEARBY_SHOPS) },
                             shape = RoundedCornerShape(CornerRadiusButton),
                             modifier = Modifier
-                                .weight(1f)
-                                .height(52.dp)
+                                .fillMaxWidth()
+                                .height(50.dp)
                                 .testTag("find_nearby_shops_button")
                         ) {
                             Row(
@@ -236,11 +224,11 @@ fun UserHomeScreen(
                                     tint = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(18.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Nearby Shops",
+                                    text = "Find Nearby Shops",
                                     style = MaterialTheme.typography.labelLarge.copy(
-                                        fontWeight = FontWeight.Bold,
+                                        fontWeight = FontWeight.SemiBold,
                                         fontSize = 14.sp
                                     )
                                 )
@@ -275,7 +263,7 @@ fun UserHomeScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "ACTIVE PRINT",
+                                    text = "Active Print",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     letterSpacing = 0.5.sp,
@@ -419,10 +407,17 @@ fun UserHomeScreen(
                                         tint = Color(0xFF059669),
                                         modifier = Modifier.size(15.dp)
                                     )
+                                    Spacer(modifier = Modifier.width(2.dp))
+                                    Text(
+                                        text = "Verified",
+                                        color = Color(0xFF059669),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 }
                             }
                             Text(
-                                text = "${shop.address} • Terminal ID: ${shop.id}",
+                                text = shop.address,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,

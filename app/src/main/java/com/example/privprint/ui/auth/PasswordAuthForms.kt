@@ -67,7 +67,7 @@ internal fun CustomerPasswordAuthForm(
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Text(
-                text = if (registering) "Create Customer Account" else "Customer Sign-In",
+                text = if (registering) "Create Customer Account" else "Welcome to PrivPrint",
                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                 color = MaterialTheme.colorScheme.onSurface
             )
@@ -75,7 +75,7 @@ internal fun CustomerPasswordAuthForm(
                 text = if (registering) {
                     "Create a new account with your email and password."
                 } else {
-                    "Sign in with the email and password for your customer account."
+                    "Sign in to your PrivPrint account"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -195,16 +195,7 @@ internal fun CustomerPasswordAuthForm(
                 },
                 modifier = Modifier.align(Alignment.CenterHorizontally)
             ) {
-                Text(if (registering) "Already have an account? Sign in" else "New customer? Create account")
-            }
-            TextButton(
-                onClick = onSwitchToShop,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
-            ) {
-                Text(
-                    "Are you a Xerox Shop Operator? Switch to Shop Login →",
-                    textAlign = TextAlign.Center
-                )
+                Text(if (registering) "Already have an account? Sign in" else "New to PrivPrint? Create an account")
             }
         }
     }

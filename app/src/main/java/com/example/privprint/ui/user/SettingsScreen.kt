@@ -124,82 +124,7 @@ fun SettingsScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Group 0: Cloud API & Environment
-            item {
-                SettingsSectionHeader(title = "Cloud Infrastructure & API URL")
-                Spacer(modifier = Modifier.height(8.dp))
-                PrivPrintCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.CloudDone,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text(
-                                    text = "Active API Endpoint",
-                                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = environmentMode.baseUrl,
-                                    fontFamily = FontFamily.Monospace,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
 
-                        Spacer(modifier = Modifier.height(4.dp))
-
-                        EnvironmentMode.entries.forEach { mode ->
-                            val isSelected = environmentMode == mode
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(
-                                        if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-                                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                                    )
-                                    .clickable { onEnvironmentChange(mode) }
-                                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = mode.label,
-                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = mode.baseUrl,
-                                        fontFamily = FontFamily.Monospace,
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-
-                                if (isSelected) {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = "Selected",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
 
             // Group 1: Appearance / Theme
             item {
@@ -249,9 +174,9 @@ fun SettingsScreen(
                 }
             }
 
-            // Group 2: Account & Identity (User Profile)
+            // Group 2: Account
             item {
-                SettingsSectionHeader(title = "Account & Profile")
+                SettingsSectionHeader(title = "Account")
                 Spacer(modifier = Modifier.height(8.dp))
                 PrivPrintCard(modifier = Modifier.fillMaxWidth()) {
                     Column(
@@ -264,53 +189,14 @@ fun SettingsScreen(
                             subtitle = if (!currentUser?.phoneNumber.isNullOrBlank()) {
                                 "Mobile: ${maskedPhoneNumber(currentUser?.phoneNumber)}"
                             } else {
-                                "Active Encrypted Session"
+                                "Active Session"
                             }
-                        )
-                        SettingsRow(
-                            icon = Icons.Default.Shield,
-                            title = "Privacy Level",
-                            subtitle = "Protected • Memory encryption active (Zero Cloud Logs)"
                         )
 
                         Spacer(modifier = Modifier.height(4.dp))
 
-                        // Switch / Change Login actions
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = { onOpenLogin(null) },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.SwitchAccount,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Switch Login", fontSize = 12.sp)
-                            }
-
-                            OutlinedButton(
-                                onClick = { onOpenLogin(AppMode.SHOP) },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Storefront,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Shop Login", fontSize = 12.sp)
-                            }
-                        }
-
                         PrivPrintOutlinedButton(
-                            text = "Log Out of Account",
+                            text = "Log Out",
                             icon = Icons.Default.ExitToApp,
                             onClick = onLogout,
                             modifier = Modifier.fillMaxWidth()
@@ -367,9 +253,9 @@ fun SettingsScreen(
                 }
             }
 
-            // Group 4: Security & Clean-up Policy
+            // Group 4: Privacy & Security
             item {
-                SettingsSectionHeader(title = "Security & Retention")
+                SettingsSectionHeader(title = "Privacy & Security")
                 Spacer(modifier = Modifier.height(8.dp))
                 PrivPrintCard(modifier = Modifier.fillMaxWidth()) {
                     Column(
@@ -377,20 +263,29 @@ fun SettingsScreen(
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         SettingsRow(
-                            icon = Icons.Default.Lock,
-                            title = "Encryption Standard",
-                            subtitle = "AES-256-GCM with fresh ephemeral keys"
+                            icon = Icons.Default.Shield,
+                            title = "Privacy Center",
+                            subtitle = "Manage your data and privacy"
                         )
                         SettingsRow(
-                            icon = Icons.Default.Security,
-                            title = "Retention Policy",
-                            subtitle = "Temporary session destroyed on completion or timeout"
+                            icon = Icons.Default.Lock,
+                            title = "Security",
+                            subtitle = "Your documents are encrypted during transfer"
+                        )
+                        
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        PrivPrintOutlinedButton(
+                            text = "Clear Current Session",
+                            icon = Icons.Default.PowerSettingsNew,
+                            onClick = onResetSession,
+                            modifier = Modifier.fillMaxWidth()
                         )
                     }
                 }
             }
 
-            // Group 5: About & Reset
+            // Group 5: About
             item {
                 SettingsSectionHeader(title = "About")
                 Spacer(modifier = Modifier.height(8.dp))
@@ -402,19 +297,26 @@ fun SettingsScreen(
                         SettingsRow(
                             icon = Icons.Default.Info,
                             title = "PrivPrint Version",
-                            subtitle = "1.2.0 • Privacy Architecture Build"
+                            subtitle = "1.2.0"
+                        )
+                        SettingsRow(
+                            icon = Icons.Default.Shield,
+                            title = "Privacy Policy",
+                            subtitle = "Read our privacy policy"
+                        )
+                        SettingsRow(
+                            icon = Icons.Default.Info,
+                            title = "Terms of Service",
+                            subtitle = "Read our terms"
+                        )
+                        SettingsRow(
+                            icon = Icons.Default.Person,
+                            title = "Support",
+                            subtitle = "Contact customer support"
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                PrivPrintOutlinedButton(
-                    text = "Reset Current Session",
-                    icon = Icons.Default.PowerSettingsNew,
-                    onClick = onResetSession,
-                    modifier = Modifier.fillMaxWidth()
-                )
                 Spacer(modifier = Modifier.height(24.dp))
             }
         }

@@ -77,7 +77,7 @@ fun PrintConfirmationScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "Confirm Print",
+                        text = "Review your print",
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                     )
                 },
@@ -120,10 +120,10 @@ fun PrintConfirmationScreen(
                     )
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    DetailItem(label = "Destination Shop", value = shop.name)
+                    DetailItem(label = "Shop", value = shop.name)
                     DetailItem(label = "Document", value = document.name)
-                    DetailItem(label = "Pages per copy", value = "${document.pageCount} pages")
-                    DetailItem(label = "Authorized copies", value = "${settings.copies}")
+                    DetailItem(label = "Pages", value = "${document.pageCount} pages")
+                    DetailItem(label = "Copies", value = "${settings.copies}")
                     DetailItem(label = "Color mode", value = if (settings.colorMode == ColorMode.COLOR) "Color" else "Black & White")
                     DetailItem(label = "Paper size", value = settings.paperSize.label)
 
@@ -167,7 +167,7 @@ fun PrintConfirmationScreen(
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "Document is encrypted before leaving your device and decrypted exclusively during active printing.",
+                        text = "Your documents are encrypted before sending",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -178,7 +178,7 @@ fun PrintConfirmationScreen(
 
             // Action CTAs
             PrivPrintPrimaryButton(
-                text = "Confirm & Send to Printer",
+                text = "Send Secure Print",
                 icon = Icons.Default.Print,
                 onClick = onConfirm,
                 modifier = Modifier.fillMaxWidth(),

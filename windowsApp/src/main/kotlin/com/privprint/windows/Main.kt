@@ -1082,6 +1082,7 @@ private fun StationApplication(bridge: StationBridge, initialStatus: StationStat
                         )
                         StationPage.SETTINGS  -> SettingsPage(
                             status,
+                            shop,
                             onToggleAutoPrint = { enabled ->
                                 autoPrintBusy = true; actionMessage = null
                                 scope.launch {
@@ -1091,6 +1092,44 @@ private fun StationApplication(bridge: StationBridge, initialStatus: StationStat
                                         actionMessage = if (enabled) "Auto-print enabled." else "Auto-print paused."
                                     } catch (ex: Exception) { actionMessage = ex.message }
                                     finally { autoPrintBusy = false }
+                                }
+                            },
+                            onUpdateHistoryRetention = { hours ->
+                                try {
+                                    withContext(Dispatchers.IO) { bridge.setHistoryRetentionHours(hours) }
+                                    refreshStatus()
+                                    refreshQueue(showLoading = false)
+                                    true
+                                } catch (ex: Exception) {
+                                    actionMessage = ex.message ?: "Failed to update history retention."
+                                    false
+                                }
+                            },
+                            onUpdateLocation = { lat, lng, addr ->
+                                try {
+                                    val updated = withContext(Dispatchers.IO) { bridge.updateShopLocation(lat, lng, addr) }
+                                    shop = updated
+                                    refreshStatus()
+                                    actionMessage = "Shop location saved. Shop is now discoverable in nearby searches."
+                                    true
+                                } catch (ex: Exception) {
+                                    actionMessage = ex.message ?: "Failed to save location."
+                                    false
+                                }
+                            },
+                            onDetectLocation = {
+                                withContext(Dispatchers.IO) { bridge.detectCurrentLocation() }
+                            },
+                            onDisableLocation = {
+                                try {
+                                    val updated = withContext(Dispatchers.IO) { bridge.disableShopLocation() }
+                                    shop = updated
+                                    refreshStatus()
+                                    actionMessage = "Shop location disabled."
+                                    true
+                                } catch (ex: Exception) {
+                                    actionMessage = ex.message ?: "Failed to disable location."
+                                    false
                                 }
                             },
                             onLogout = {
@@ -2187,10 +2226,16 @@ private fun ControlField(label: String, value: String) {
 @Composable
 private fun SettingsPage(
     status: StationStatus?,
+    shop: ShopDetails?,
     onToggleAutoPrint: (Boolean) -> Unit,
+    onUpdateHistoryRetention: suspend (Int) -> Boolean,
+    onUpdateLocation: suspend (lat: Double, lng: Double, address: String?) -> Boolean,
+    onDetectLocation: suspend () -> Pair<Double, Double>?,
+    onDisableLocation: suspend () -> Boolean,
     onLogout: () -> Unit
 ) {
-    var selectedCategory by remember { mutableStateOf("GENERAL") }
+    val coroutineScope = rememberCoroutineScope()
+    var selectedCategory by remember { mutableStateOf("SECURITY") }
 
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
         // Left Categories
@@ -2200,7 +2245,7 @@ private fun SettingsPage(
         ) {
             SettingsCategoryItem("General & Shop", selectedCategory == "GENERAL") { selectedCategory = "GENERAL" }
             SettingsCategoryItem("Printing & Spooler", selectedCategory == "PRINTING") { selectedCategory = "PRINTING" }
-            SettingsCategoryItem("Privacy & Security", selectedCategory == "SECURITY") { selectedCategory = "SECURITY" }
+            SettingsCategoryItem("Privacy / Print History", selectedCategory == "SECURITY") { selectedCategory = "SECURITY" }
             SettingsCategoryItem("About PrivPrint", selectedCategory == "ABOUT") { selectedCategory = "ABOUT" }
         }
 
@@ -2208,6 +2253,247 @@ private fun SettingsPage(
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             when (selectedCategory) {
                 "GENERAL" -> {
+                    // Shop Location & Discovery Card
+                    val isLocEnabled = shop?.locationEnabled == true || status?.locationEnabled == true
+                    val currentLat = shop?.latitude ?: status?.shopLatitude
+                    val currentLng = shop?.longitude ?: status?.shopLongitude
+                    val currentAddr = shop?.address?.takeIf { it.isNotBlank() } ?: status?.shopAddress?.takeIf { it.isNotBlank() } ?: ""
+
+                    var latText by remember(currentLat) { mutableStateOf(currentLat?.toString() ?: "") }
+                    var lngText by remember(currentLng) { mutableStateOf(currentLng?.toString() ?: "") }
+                    var addrText by remember(currentAddr) { mutableStateOf(currentAddr) }
+                    var locFeedback by remember { mutableStateOf<String?>(null) }
+                    var isDetecting by remember { mutableStateOf(false) }
+                    var isSavingLocation by remember { mutableStateOf(false) }
+                    var isDisablingLocation by remember { mutableStateOf(false) }
+
+                    Card(
+                        Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(PureWhite),
+                        shape = RoundedCornerShape(14.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Slate200),
+                    ) {
+                        Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text("Shop Location & Nearby Discovery", color = Slate900, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                    Text("Configure your Xerox shop's geographic location so nearby customers can find you.", color = Slate600, fontSize = 12.5.sp)
+                                }
+                                Box(
+                                    Modifier.clip(RoundedCornerShape(6.dp))
+                                        .background(if (isLocEnabled) EmeraldLight else Slate100)
+                                        .border(1.dp, if (isLocEnabled) EmeraldBorder else Slate200, RoundedCornerShape(6.dp))
+                                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        StationIcons.Location(modifier = Modifier.size(12.dp), color = if (isLocEnabled) Emerald else Slate500)
+                                        Text(
+                                            if (isLocEnabled) "[ Location Enabled ]" else "[ Location Disabled ]",
+                                            color = if (isLocEnabled) Emerald else Slate600,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (isLocEnabled) {
+                                Box(
+                                    Modifier.fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(EmeraldLight)
+                                        .border(1.dp, EmeraldBorder, RoundedCornerShape(8.dp))
+                                        .padding(12.dp)
+                                ) {
+                                    Text(
+                                        "\"Your shop can appear in nearby shop searches.\"",
+                                        color = EmeraldHover,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Text("Customer-Facing Shop Address", color = Slate700, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                OutlinedTextField(
+                                    value = addrText,
+                                    onValueChange = { addrText = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    placeholder = { Text("e.g. Shop 4, Station Road Xerox Market", fontSize = 12.5.sp, color = Slate400) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = TextFieldDefaults.colors(
+                                        focusedContainerColor = PureWhite,
+                                        unfocusedContainerColor = PureWhite,
+                                        focusedIndicatorColor = BrandBlue,
+                                        unfocusedIndicatorColor = Slate200,
+                                        focusedTextColor = Slate900,
+                                        unfocusedTextColor = Slate800,
+                                    )
+                                )
+
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text("Latitude (-90 to 90)", color = Slate700, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                        OutlinedTextField(
+                                            value = latText,
+                                            onValueChange = { latText = it },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            placeholder = { Text("e.g. 23.0225", fontSize = 12.5.sp, color = Slate400) },
+                                            singleLine = true,
+                                            shape = RoundedCornerShape(8.dp),
+                                            colors = TextFieldDefaults.colors(
+                                                focusedContainerColor = PureWhite,
+                                                unfocusedContainerColor = PureWhite,
+                                                focusedIndicatorColor = BrandBlue,
+                                                unfocusedIndicatorColor = Slate200,
+                                                focusedTextColor = Slate900,
+                                                unfocusedTextColor = Slate800,
+                                            )
+                                        )
+                                    }
+
+                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text("Longitude (-180 to 180)", color = Slate700, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                        OutlinedTextField(
+                                            value = lngText,
+                                            onValueChange = { lngText = it },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            placeholder = { Text("e.g. 72.5714", fontSize = 12.5.sp, color = Slate400) },
+                                            singleLine = true,
+                                            shape = RoundedCornerShape(8.dp),
+                                            colors = TextFieldDefaults.colors(
+                                                focusedContainerColor = PureWhite,
+                                                unfocusedContainerColor = PureWhite,
+                                                focusedIndicatorColor = BrandBlue,
+                                                unfocusedIndicatorColor = Slate200,
+                                                focusedTextColor = Slate900,
+                                                unfocusedTextColor = Slate800,
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            coroutineScope.launch {
+                                                isDetecting = true
+                                                locFeedback = null
+                                                try {
+                                                    val detected = onDetectLocation()
+                                                    if (detected != null) {
+                                                        latText = detected.first.toString()
+                                                        lngText = detected.second.toString()
+                                                        locFeedback = "Location detected successfully."
+                                                    } else {
+                                                        locFeedback = "Could not automatically determine location. Enter coordinates manually."
+                                                    }
+                                                } catch (ex: Exception) {
+                                                    locFeedback = ex.message ?: "Detection failed."
+                                                } finally {
+                                                    isDetecting = false
+                                                }
+                                            }
+                                        },
+                                        enabled = !isDetecting,
+                                        shape = RoundedCornerShape(8.dp),
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = BrandBlue),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, BrandBlueBorder),
+                                        modifier = Modifier.height(38.dp)
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            if (isDetecting) {
+                                                CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 2.dp, color = BrandBlue)
+                                            } else {
+                                                StationIcons.Location(modifier = Modifier.size(12.dp), color = BrandBlue)
+                                            }
+                                            Text(if (isDetecting) "Detecting..." else "Auto-Detect Location", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                        }
+                                    }
+
+                                    Button(
+                                        onClick = {
+                                            val lat = latText.toDoubleOrNull()
+                                            val lng = lngText.toDoubleOrNull()
+                                            if (lat == null || lat !in -90.0..90.0 || lng == null || lng !in -180.0..180.0) {
+                                                locFeedback = "Invalid coordinates. Latitude must be between -90 and 90, Longitude between -180 and 180."
+                                                return@Button
+                                            }
+                                            locFeedback = null
+                                            isSavingLocation = true
+                                            coroutineScope.launch {
+                                                try {
+                                                    val ok = onUpdateLocation(lat, lng, addrText.ifBlank { null })
+                                                    locFeedback = if (ok) "Location saved and shop is now discoverable." else "Failed to save location. Please try again."
+                                                } catch (ex: Exception) {
+                                                    locFeedback = ex.message ?: "Failed to save location."
+                                                } finally {
+                                                    isSavingLocation = false
+                                                }
+                                            }
+                                        },
+                                        enabled = !isSavingLocation && !isDetecting,
+                                        colors = ButtonDefaults.buttonColors(BrandBlue, PureWhite),
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.height(38.dp)
+                                    ) {
+                                        if (isSavingLocation) {
+                                            CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 2.dp, color = PureWhite)
+                                            Spacer(Modifier.width(6.dp))
+                                        }
+                                        Text(if (isSavingLocation) "Saving..." else "Save & Enable Location", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    }
+                                }
+
+                                if (isLocEnabled) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            locFeedback = null
+                                            isDisablingLocation = true
+                                            coroutineScope.launch {
+                                                try {
+                                                    val ok = onDisableLocation()
+                                                    locFeedback = if (ok) "Location disabled." else "Failed to disable location."
+                                                } catch (ex: Exception) {
+                                                    locFeedback = ex.message ?: "Failed to disable location."
+                                                } finally {
+                                                    isDisablingLocation = false
+                                                }
+                                            }
+                                        },
+                                        enabled = !isDisablingLocation,
+                                        shape = RoundedCornerShape(8.dp),
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Slate600),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, Slate200),
+                                        modifier = Modifier.height(38.dp)
+                                    ) {
+                                        Text(if (isDisablingLocation) "Disabling..." else "Disable Location", fontSize = 11.5.sp)
+                                    }
+                                }
+                            }
+
+                            if (locFeedback != null) {
+                                Text(
+                                    locFeedback!!,
+                                    color = if (locFeedback!!.contains("Invalid") || locFeedback!!.contains("Could not") || locFeedback!!.contains("failed")) Rose else Emerald,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
                     Card(
                         Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(PureWhite),
@@ -2269,6 +2555,159 @@ private fun SettingsPage(
                     }
                 }
                 "SECURITY" -> {
+                    val currentRetention = status?.historyRetentionHours ?: 4
+                    var selectedHours by remember(currentRetention) { mutableStateOf(currentRetention) }
+                    var feedbackMessage by remember { mutableStateOf<String?>(null) }
+                    var dropdownExpanded by remember { mutableStateOf(false) }
+                    var isUpdatingRetention by remember { mutableStateOf(false) }
+
+                    fun updateRetention(hours: Int) {
+                        dropdownExpanded = false
+                        if (selectedHours != hours && !isUpdatingRetention) {
+                            val oldHours = selectedHours
+                            isUpdatingRetention = true
+                            feedbackMessage = null
+                            coroutineScope.launch {
+                                try {
+                                    val ok = onUpdateHistoryRetention(hours)
+                                    if (ok) {
+                                        selectedHours = hours
+                                        feedbackMessage = if (hours < oldHours) {
+                                            "History older than $hours hour${if (hours > 1) "s" else ""} will become eligible for automatic deletion."
+                                        } else {
+                                            "Print history retention updated to $hours hour${if (hours > 1) "s" else ""}."
+                                        }
+                                    } else {
+                                        feedbackMessage = "Failed to update print history retention."
+                                    }
+                                } catch (ex: Exception) {
+                                    feedbackMessage = ex.message ?: "Failed to update print history retention."
+                                } finally {
+                                    isUpdatingRetention = false
+                                }
+                            }
+                        }
+                    }
+
+                    // Card 1: Print History Retention
+                    Card(
+                        Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(PureWhite),
+                        shape = RoundedCornerShape(14.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Slate200),
+                    ) {
+                        Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text("Print History Retention", color = Slate900, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                    Text("Choose how long completed print history remains available on this Windows Station.", color = Slate600, fontSize = 12.5.sp)
+                                }
+                                Box(
+                                    Modifier.clip(RoundedCornerShape(6.dp))
+                                        .background(BrandBlueLight)
+                                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                                ) {
+                                    Text("Current retention: $currentRetention hour${if (currentRetention > 1) "s" else ""}", color = BrandBlue, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            }
+
+                            // Professional Selector: Dropdown trigger [ 4 Hours ▼ ] with interactive direct pills
+                            val retentionOptions = listOf(1, 2, 4, 6, 8)
+
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    Modifier.clip(RoundedCornerShape(8.dp))
+                                        .background(Slate100)
+                                        .border(1.dp, Slate300, RoundedCornerShape(8.dp))
+                                        .clickable { dropdownExpanded = !dropdownExpanded }
+                                        .padding(horizontal = 16.dp, vertical = 9.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text("$selectedHours Hour${if (selectedHours > 1) "s" else ""}", color = Slate900, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        Text(if (dropdownExpanded) "▲" else "▼", color = Slate500, fontSize = 10.sp)
+                                    }
+                                }
+
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    retentionOptions.forEach { hours ->
+                                        val isSelected = selectedHours == hours
+                                        Box(
+                                            Modifier.clip(RoundedCornerShape(8.dp))
+                                                .background(if (isSelected) BrandBlue else Slate50)
+                                                .border(1.dp, if (isSelected) BrandBlueHover else Slate200, RoundedCornerShape(8.dp))
+                                                .clickable { updateRetention(hours) }
+                                                .padding(horizontal = 12.dp, vertical = 7.dp)
+                                        ) {
+                                            Text(
+                                                "$hours Hour${if (hours > 1) "s" else ""}",
+                                                color = if (isSelected) PureWhite else Slate700,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                fontSize = 12.sp
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (dropdownExpanded) {
+                                Card(
+                                    Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(Slate50),
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Slate200)
+                                ) {
+                                    Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text("Available Retention Options (Maximum: 8 Hours):", color = Slate500, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                                        retentionOptions.forEach { hours ->
+                                            val isSelected = selectedHours == hours
+                                            Row(
+                                                Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp))
+                                                    .background(if (isSelected) BrandBlueLight else Color.Transparent)
+                                                    .clickable { updateRetention(hours) }
+                                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text("$hours Hour${if (hours > 1) "s" else ""}", color = if (isSelected) BrandBlue else Slate800, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal, fontSize = 12.5.sp)
+                                                if (isSelected) Text("✓ Selected", color = BrandBlue, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Notice below selector
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Slate50).padding(10.dp).fillMaxWidth()
+                            ) {
+                                Text("›", color = Slate500, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text(
+                                    "Completed print history older than the selected retention period will be automatically removed.",
+                                    color = Slate500,
+                                    fontSize = 11.5.sp
+                                )
+                            }
+
+                            feedbackMessage?.let { msg ->
+                                ModernNotice(msg, isError = msg.startsWith("Failed") || msg.startsWith("Error"))
+                            }
+                        }
+                    }
+
+                    // Card 2: Zero-Knowledge Security Architecture
                     Card(
                         Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(PureWhite),

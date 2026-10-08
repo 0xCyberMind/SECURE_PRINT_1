@@ -242,14 +242,14 @@ fun NearbyShopsScreen(
 
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                text = "Location Access Needed",
+                                text = "Find nearby print shops",
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
 
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = "Allow location access to automatically find verified PrivPrint Xerox shops near you in real-time.",
+                                text = "PrivPrint uses your location only to show nearby registered print shops.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center
@@ -282,7 +282,7 @@ fun NearbyShopsScreen(
                                         modifier = Modifier.size(16.dp)
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Enable Location", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Text("Continue", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                 }
 
                                 OutlinedButton(
@@ -348,13 +348,13 @@ fun NearbyShopsScreen(
                             )
                             Spacer(modifier = Modifier.height(10.dp))
                             Text(
-                                text = "No Xerox shops found within ${selectedRadiusKm.toInt()} km",
+                                text = "No nearby PrivPrint shops found.",
                                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Try increasing the search radius or scan the counter QR code directly.",
+                                text = "Try scanning a shop QR code instead.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center
@@ -366,7 +366,7 @@ fun NearbyShopsScreen(
                             ) {
                                 Icon(imageVector = Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Scan Shop Counter QR")
+                                Text("Scan QR")
                             }
                         }
                     }

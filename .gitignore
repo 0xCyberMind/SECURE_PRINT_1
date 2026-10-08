@@ -44,3 +44,5 @@ debug.keystore
 /windows_agent/dist/
 /windowsApp/bin/
 *.log
+*.msi
+*.apk

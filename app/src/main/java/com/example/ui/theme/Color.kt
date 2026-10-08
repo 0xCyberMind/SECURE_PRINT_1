@@ -2,21 +2,21 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Light Theme Palette - Refined Slate, Crisp White, Cobalt & Emerald Accents
-val PrimarySlate = Color(0xFF0F172A) // Slate-900 (Authoritative, Trustworthy)
+// Light Theme Palette - Premium Consumer Redesign
+val PrimarySlate = Color(0xFF0F172A) // Deep Navy
 val PrimarySlateVariant = Color(0xFF1E293B)
-val PrimaryActionBlue = Color(0xFF2563EB) // Blue-600 (Clean, modern CTA)
-val PrimaryActionBlueHover = Color(0xFF1D4ED8)
+val PrimaryActionBlue = Color(0xFF1E40AF) // Deep blue primary
+val PrimaryActionBlueHover = Color(0xFF1E3A8A) // Dark variant
 
-val SurfaceLight = Color(0xFFFFFFFF)
+val SurfaceLight = Color(0xFFFFFFFF) // Clean white
 val SurfaceCardLight = Color(0xFFFFFFFF)
-val SurfaceVariantLight = Color(0xFFF1F5F9) // Slate-100
-val BackgroundLight = Color(0xFFFFFFFF) // Crisp Pure White
+val SurfaceVariantLight = Color(0xFFF8FAFC) // Very light gray
+val BackgroundLight = Color(0xFFFFFFFF)
 
-val TextPrimaryLight = Color(0xFF0F172A) // Slate-900
-val TextSecondaryLight = Color(0xFF475569) // Slate-600
-val TextMutedLight = Color(0xFF94A3B8) // Slate-400
-val OutlineLight = Color(0xFFE2E8F0) // Slate-200
+val TextPrimaryLight = Color(0xFF0F172A) // Deep navy text
+val TextSecondaryLight = Color(0xFF475569) // Secondary text
+val TextMutedLight = Color(0xFF94A3B8)
+val OutlineLight = Color(0xFFE2E8F0)
 
 // Dark Theme Palette - Deep Midnight Slate (Complete design, no neon)
 val PrimarySlateDark = Color(0xFFF8FAFC)

@@ -91,9 +91,6 @@ fun AuthScreen(
     loginError: String? = null,
     modifier: Modifier = Modifier
 ) {
-    // 0 = Customer Login, 1 = Xerox Shop Operator Login
-    var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab) }
-
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background
@@ -184,38 +181,13 @@ fun AuthScreen(
                 }
             }
 
-            // Segmented Role Selector
-            RoleSegmentedTab(
-                selectedTab = selectedTab,
-                onTabSelected = { selectedTab = it }
+            // Always show customer login form
+            CustomerPasswordAuthForm(
+                onAuthenticate = onAuthenticateUser,
+                loginInProgress = loginInProgress,
+                loginError = loginError,
+                onSwitchToShop = {}
             )
-
-            // Dynamic Form depending on role
-            AnimatedVisibility(
-                visible = selectedTab == 0,
-                enter = fadeIn(),
-                exit = fadeOut()
-            ) {
-                CustomerPasswordAuthForm(
-                    onAuthenticate = onAuthenticateUser,
-                    loginInProgress = loginInProgress,
-                    loginError = loginError,
-                    onSwitchToShop = { selectedTab = 1 }
-                )
-            }
-
-            AnimatedVisibility(
-                visible = selectedTab == 1,
-                enter = fadeIn(),
-                exit = fadeOut()
-            ) {
-                ShopPasswordAuthForm(
-                    onAuthenticate = onAuthenticateShop,
-                    loginInProgress = loginInProgress,
-                    loginError = loginError,
-                    onSwitchToCustomer = { selectedTab = 0 }
-                )
-            }
 
             Spacer(modifier = Modifier.height(16.dp))
         }
@@ -328,13 +300,13 @@ private fun CustomerLoginForm(
         ) {
             Column {
                 Text(
-                    text = "Customer Sign-In",
+                    text = "Welcome to PrivPrint",
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Enter your name and mobile number to print privately at any partner Xerox shop.",
+                    text = "Sign in to securely print your documents",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -519,18 +491,6 @@ private fun CustomerLoginForm(
                 }
             }
 
-            // Bottom Switcher
-            TextButton(
-                onClick = onSwitchToShop,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
-            ) {
-                Text(
-                    text = "Are you a Xerox Shop Operator? Switch to Shop Login →",
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                    color = MaterialTheme.colorScheme.primary,
-                    textAlign = TextAlign.Center
-                )
-            }
         }
     }
 }

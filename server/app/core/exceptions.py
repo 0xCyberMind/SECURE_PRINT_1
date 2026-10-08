@@ -2,6 +2,7 @@ from enum import Enum
 from typing import Any, Optional
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -88,7 +89,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         code=ErrorCode.VALIDATION_ERROR.value,
         message="Request validation failed",
-        details=exc.errors(),
+        details=jsonable_encoder(exc.errors()),
         request_id=request_id
     )
 

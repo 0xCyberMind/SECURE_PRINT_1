@@ -1,6 +1,6 @@
 from typing import Optional, List
 from datetime import datetime
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 
 class ShopCreateRequest(BaseModel):
@@ -10,6 +10,45 @@ class ShopCreateRequest(BaseModel):
     longitude: Optional[float] = None
     supports_color: bool = True
     supports_duplex: bool = True
+    history_retention_hours: int = Field(default=4, description="Default print history retention hours (allowed: 1, 2, 4, 6, 8)")
+
+    @field_validator("history_retention_hours")
+    @classmethod
+    def validate_retention_hours(cls, v: int) -> int:
+        if v not in (1, 2, 4, 6, 8):
+            raise ValueError("History retention hours must be one of: 1, 2, 4, 6, 8")
+        return v
+
+
+class ShopSettingsResponse(BaseModel):
+    shop_id: str
+    history_retention_hours: int
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    address: Optional[str] = None
+    location_enabled: bool = False
+
+
+class ShopSettingsUpdateRequest(BaseModel):
+    history_retention_hours: Optional[int] = Field(default=None, description="Print history retention hours (allowed: 1, 2, 4, 6, 8)")
+    latitude: Optional[float] = Field(default=None, ge=-90.0, le=90.0, description="Shop latitude (-90 to 90)")
+    longitude: Optional[float] = Field(default=None, ge=-180.0, le=180.0, description="Shop longitude (-180 to 180)")
+    address: Optional[str] = Field(default=None, min_length=2, max_length=500, description="Shop physical address")
+    clear_location: bool = Field(default=False, description="Flag to clear shop coordinates")
+
+    @field_validator("history_retention_hours")
+    @classmethod
+    def validate_retention_hours(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v not in (1, 2, 4, 6, 8):
+            raise ValueError("History retention hours must be one of: 1, 2, 4, 6, 8")
+        return v
+
+
+class ShopLocationUpdateRequest(BaseModel):
+    latitude: Optional[float] = Field(default=None, ge=-90.0, le=90.0, description="Shop latitude (-90 to 90)")
+    longitude: Optional[float] = Field(default=None, ge=-180.0, le=180.0, description="Shop longitude (-180 to 180)")
+    address: Optional[str] = Field(default=None, min_length=2, max_length=500, description="Optional updated shop physical address")
+    clear_location: bool = Field(default=False, description="Flag to clear shop coordinates")
 
 
 class ShopResponse(BaseModel):
@@ -26,6 +65,7 @@ class ShopResponse(BaseModel):
     supports_color: bool
     supports_duplex: bool
     permanent_qr_payload: str
+    history_retention_hours: int = 4
     created_at: datetime
     updated_at: datetime
 
@@ -46,6 +86,11 @@ class NearbyShopResponse(BaseModel):
     distance_km: float
     distanceKm: Optional[float] = None
     status: str
+    is_online: bool = True
+    is_verified: bool = True
+    supports_color: bool = True
+    supports_duplex: bool = True
+    permanent_qr_payload: Optional[str] = None
 
     def __init__(self, **data):
         if "id" not in data and "shop_id" in data:

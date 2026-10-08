@@ -150,7 +150,7 @@ fun ActiveTrackingScreen(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "Your document has been printed and temporary print data removed.",
+                    text = "Your documents have been printed successfully.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
@@ -172,11 +172,9 @@ fun ActiveTrackingScreen(
                         )
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        DetailRow(label = "Document", value = PRIVATE_DOCUMENT_LABEL)
-                        DetailRow(label = "Number of copies", value = "${job.copiesPrinted} copies")
                         DetailRow(label = "Shop", value = job.shopName)
+                        DetailRow(label = "Copies", value = "${job.copiesPrinted} copies")
                         DetailRow(label = "Time", value = timeFormat.format(Date(job.createdAt)))
-                        DetailRow(label = "Status", value = "Completed")
                     }
                 }
 
@@ -190,7 +188,7 @@ fun ActiveTrackingScreen(
                 )
 
                 PrivPrintOutlinedButton(
-                    text = "Print another",
+                    text = "Print Another",
                     icon = Icons.Default.Add,
                     onClick = onPrintAnother,
                     modifier = Modifier.fillMaxWidth()
@@ -204,7 +202,7 @@ fun ActiveTrackingScreen(
             if (job.status == PrintJobStatus.FAILED) {
                 PrivPrintErrorState(
                     title = "Something went wrong",
-                    message = "We couldn't complete your print request. Please try again.",
+                    message = "We couldn't complete your print. Please try again.",
                     onRetry = { onStartPrintingSimulation(job) }
                 )
                 Spacer(modifier = Modifier.height(8.dp))
@@ -275,7 +273,12 @@ fun ActiveTrackingScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (job.status == PrintJobStatus.PRINTING) "Printing your document" else "Queued at printer",
+                            text = when (job.status) {
+                                PrintJobStatus.PREPARING -> "Documents prepared"
+                                PrintJobStatus.QUEUED -> "Sending to shop"
+                                PrintJobStatus.PRINTING -> "Printing your documents"
+                                else -> "Printing"
+                            },
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface
                         )

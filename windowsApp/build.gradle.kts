@@ -25,7 +25,7 @@ compose.desktop {
 
     nativeDistributions {
       packageName = "PrivPrint Shop Station"
-      packageVersion = "1.0.5"
+      packageVersion = "1.0.6"
       description = "PrivPrint secure Windows shop station"
       vendor = "PrivPrint"
       targetFormats(org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe, org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi)

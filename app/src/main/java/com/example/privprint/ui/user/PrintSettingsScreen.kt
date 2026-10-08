@@ -91,7 +91,7 @@ fun PrintSettingsScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "Print Settings",
+                        text = "Print settings",
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                     )
                 },
@@ -175,14 +175,9 @@ fun PrintSettingsScreen(
                 ) {
                     Column {
                         Text(
-                            text = "Number of Copies",
+                            text = "Copies",
                             style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
                             color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "Authorized output count",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
 
@@ -369,8 +364,8 @@ fun PrintSettingsScreen(
 
             // Primary CTA: Print
             PrivPrintPrimaryButton(
-                text = "Print",
-                icon = Icons.Default.Print,
+                text = "Review & Print",
+                icon = Icons.AutoMirrored.Filled.ArrowForward,
                 onClick = onProceed,
                 modifier = Modifier.fillMaxWidth(),
                 testTag = "proceed_to_confirmation_button"

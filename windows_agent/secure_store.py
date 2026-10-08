@@ -58,6 +58,8 @@ class SecureCredentialStore:
                 with open(self.storage_path, "wb") as f:
                     f.write(protected)
                 return
+            except ImportError as exc:
+                raise RuntimeError("Windows DPAPI (pywin32) is required on Windows platforms") from exc
             except Exception as exc:
                 raise RuntimeError("Could not protect station credentials with Windows DPAPI") from exc
 
@@ -77,9 +79,11 @@ class SecureCredentialStore:
             try:
                 import win32crypt
                 _, decrypted = win32crypt.CryptUnprotectData(content, None, None, None, 0)
+                return json.loads(decrypted.decode("utf-8"))
+            except ImportError as exc:
+                raise RuntimeError("Windows DPAPI (pywin32) is required on Windows platforms") from exc
             except Exception as exc:
-                raise RuntimeError("Could not decrypt station credentials with Windows DPAPI") from exc
-            return json.loads(decrypted.decode("utf-8"))
+                raise RuntimeError("Could not unprotect station credentials with Windows DPAPI") from exc
 
         decoded = base64.b64decode(content, validate=True)
         return json.loads(decoded.decode("utf-8"))

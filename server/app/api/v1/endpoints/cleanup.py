@@ -8,7 +8,13 @@ from app.models.enums import UserRole
 from app.models.entities import PrintJob, Document
 from app.api.deps import get_current_user, require_roles, AuthPrincipal
 from app.services.cleanup_service import DocumentCleanupService
-from app.schemas.cleanup import CleanupResponse, CleanupStatusResponse, CleanupSweepResponse
+from app.schemas.cleanup import (
+    CleanupResponse,
+    CleanupStatusResponse,
+    CleanupSweepResponse,
+    HistoryCleanupResponse,
+    HistoryCleanupSweepResponse,
+)
 
 router = APIRouter()
 
@@ -179,3 +185,53 @@ async def trigger_cleanup_sweep(
     """
     cleanup_service = DocumentCleanupService(db)
     return await cleanup_service.run_cleanup_sweep()
+
+
+@router.post("/history/sweep", response_model=HistoryCleanupSweepResponse)
+async def trigger_history_cleanup_sweep(
+    db: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(require_roles([UserRole.ADMIN, UserRole.SHOP_OPERATOR]))
+) -> HistoryCleanupSweepResponse:
+    """
+    Triggers batch cleanup sweep of expired completed print history records.
+    Admin sweeps all shops; operator sweeps only their own shop.
+    """
+    cleanup_service = DocumentCleanupService(db)
+    if principal.role == UserRole.SHOP_OPERATOR:
+        if not principal.shop_id:
+            raise PrivPrintException(status_code=400, code=ErrorCode.VALIDATION_ERROR, message="Operator shop required")
+        from app.repositories.shop_repo import ShopRepository
+        shop = await ShopRepository(db).get_by_id(principal.shop_id)
+        if not shop or shop.owner_id != principal.user_id:
+            raise PrivPrintException(status_code=403, code=ErrorCode.FORBIDDEN, message="Operator does not own shop")
+        shop_res = await cleanup_service.cleanup_history_for_shop(principal.shop_id)
+        return HistoryCleanupSweepResponse(
+            total_scanned_jobs=shop_res.deleted_count + shop_res.retained_count,
+            total_deleted_jobs=shop_res.deleted_count,
+            total_retained_jobs=shop_res.retained_count,
+            details_by_shop={principal.shop_id: shop_res}
+        )
+    return await cleanup_service.run_history_cleanup_sweep()
+
+
+@router.post("/history/shop/{shop_id}", response_model=HistoryCleanupResponse)
+async def trigger_shop_history_cleanup(
+    shop_id: str,
+    db: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(require_roles([UserRole.ADMIN, UserRole.SHOP_OPERATOR, UserRole.PRINT_DEVICE]))
+) -> HistoryCleanupResponse:
+    """
+    Triggers history cleanup for a specific shop enforcing strict tenant authorization.
+    """
+    if principal.role != UserRole.ADMIN:
+        if principal.role == UserRole.SHOP_OPERATOR:
+            from app.repositories.shop_repo import ShopRepository
+            shop = await ShopRepository(db).get_by_id(shop_id)
+            if not shop or shop.owner_id != principal.user_id:
+                raise PrivPrintException(status_code=403, code=ErrorCode.FORBIDDEN, message="Operator does not own shop")
+        elif principal.role == UserRole.PRINT_DEVICE:
+            if principal.shop_id != shop_id:
+                raise PrivPrintException(status_code=403, code=ErrorCode.FORBIDDEN, message="Device does not belong to shop")
+
+    cleanup_service = DocumentCleanupService(db)
+    return await cleanup_service.cleanup_history_for_shop(shop_id)

@@ -129,12 +129,12 @@ data class NearbyShopDto(
     val longitude: Double = 0.0,
     @com.squareup.moshi.Json(name = "distance_km") val distanceKm: Double = 0.0,
     val status: String = "ACTIVE",
-    val isOnline: Boolean = true,
-    val isVerified: Boolean = true,
-    val supportedColor: Boolean = true,
-    val supportedDuplex: Boolean = true,
-    val activeQueueCount: Int = 0,
-    val permanentQrPayload: String = ""
+    @com.squareup.moshi.Json(name = "is_online") val isOnline: Boolean = true,
+    @com.squareup.moshi.Json(name = "is_verified") val isVerified: Boolean = true,
+    @com.squareup.moshi.Json(name = "supports_color") val supportedColor: Boolean = true,
+    @com.squareup.moshi.Json(name = "supports_duplex") val supportedDuplex: Boolean = true,
+    @com.squareup.moshi.Json(name = "active_queue_count") val activeQueueCount: Int = 0,
+    @com.squareup.moshi.Json(name = "permanent_qr_payload") val permanentQrPayload: String = ""
 ) {
     val id: String get() = shopId ?: rawId ?: ""
 }

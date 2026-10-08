@@ -16,6 +16,9 @@ from app.schemas.shop import (
     ShopCreateRequest,
     NearbyShopResponse,
     PrinterResponse,
+    ShopSettingsResponse,
+    ShopSettingsUpdateRequest,
+    ShopLocationUpdateRequest,
 )
 from app.api.deps import get_current_user, require_roles, AuthPrincipal
 
@@ -91,10 +94,12 @@ async def get_nearby_shops(
     lat: Optional[float] = Query(None, description="Alternative latitude param"),
     lng: Optional[float] = Query(None, description="Alternative longitude param"),
     radius: float = Query(default=25.0, description="Discovery radius in kilometers (0 < radius <= 100)"),
+    radius_km: Optional[float] = Query(None, description="Alternative radius in kilometers"),
     db: AsyncSession = Depends(get_db_session)
 ) -> List[NearbyShopResponse]:
     eff_lat = latitude if latitude is not None else lat
     eff_lng = longitude if longitude is not None else lng
+    eff_radius = radius_km if radius_km is not None else radius
 
     if eff_lat is None:
         raise PrivPrintException(
@@ -124,14 +129,14 @@ async def get_nearby_shops(
         )
 
     # 2. Validate radius
-    if radius <= 0.0 or radius > 100.0:
+    if eff_radius <= 0.0 or eff_radius > 100.0:
         raise PrivPrintException(
             status_code=status.HTTP_400_BAD_REQUEST,
             code=ErrorCode.VALIDATION_ERROR,
             message="Invalid radius: radius must be greater than 0 and at most 100 km"
         )
 
-    # 3. Query only registered, active, and verified shops
+    # 3. Query only registered, active, and verified shops with valid locations and stations
     stmt = (
         select(Shop)
         .where(
@@ -154,8 +159,13 @@ async def get_nearby_shops(
     # 4. Compute distances and filter within radius
     nearby_list: List[NearbyShopResponse] = []
     for shop in active_shops:
+        if shop.latitude is None or shop.longitude is None:
+            continue
+        if shop.latitude < -90.0 or shop.latitude > 90.0 or shop.longitude < -180.0 or shop.longitude > 180.0:
+            continue
+
         dist = calculate_haversine_distance_km(eff_lat, eff_lng, shop.latitude, shop.longitude)
-        if dist <= radius:
+        if dist <= eff_radius:
             # 5. Return only sanitized public shop information (never leak internal devices/keys/owners)
             nearby_list.append(
                 NearbyShopResponse(
@@ -167,7 +177,12 @@ async def get_nearby_shops(
                     longitude=shop.longitude,
                     distance_km=dist,
                     distanceKm=dist,
-                    status=shop.status
+                    status=shop.status,
+                    is_online=shop.is_online,
+                    is_verified=shop.is_verified,
+                    supports_color=shop.supports_color,
+                    supports_duplex=shop.supports_duplex,
+                    permanent_qr_payload=shop.permanent_qr_payload,
                 )
             )
 
@@ -199,7 +214,8 @@ async def create_shop(
         is_online=principal.role == UserRole.ADMIN,
         supports_color=payload.supports_color,
         supports_duplex=payload.supports_duplex,
-        permanent_qr_payload=qr_payload
+        permanent_qr_payload=qr_payload,
+        history_retention_hours=payload.history_retention_hours,
     )
     await db.commit()
     return ShopResponse.model_validate(shop)
@@ -287,3 +303,183 @@ async def get_shop_printers(
     printer_repo = PrinterRepository(db)
     printers = await printer_repo.list_by_shop(shop_id)
     return [PrinterResponse.model_validate(p) for p in printers]
+
+
+@router.get("/{shop_id}/settings", response_model=ShopSettingsResponse)
+async def get_shop_settings(
+    shop_id: str,
+    db: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(require_roles([UserRole.ADMIN, UserRole.SHOP_OPERATOR, UserRole.PRINT_DEVICE]))
+) -> ShopSettingsResponse:
+    """
+    Get shop configuration settings including print history retention hours and location status.
+    Enforces strict ownership: operator must own shop, device must belong to shop.
+    """
+    shop = await ShopRepository(db).get_by_id(shop_id)
+    if not shop:
+        raise PrivPrintException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code=ErrorCode.NOT_FOUND,
+            message=f"Shop {shop_id} not found"
+        )
+
+    if principal.role != UserRole.ADMIN:
+        if principal.role == UserRole.SHOP_OPERATOR:
+            if shop.owner_id != principal.user_id:
+                raise PrivPrintException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code=ErrorCode.FORBIDDEN,
+                    message="Access denied: operator does not own this shop"
+                )
+        elif principal.role == UserRole.PRINT_DEVICE:
+            if principal.shop_id != shop_id:
+                raise PrivPrintException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code=ErrorCode.FORBIDDEN,
+                    message="Access denied: device belongs to a different shop"
+                )
+
+    return ShopSettingsResponse(
+        shop_id=shop.id,
+        history_retention_hours=shop.history_retention_hours,
+        latitude=shop.latitude,
+        longitude=shop.longitude,
+        address=shop.address,
+        location_enabled=(shop.latitude is not None and shop.longitude is not None),
+    )
+
+
+@router.patch("/{shop_id}/settings", response_model=ShopSettingsResponse)
+async def update_shop_settings(
+    shop_id: str,
+    payload: ShopSettingsUpdateRequest,
+    db: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(require_roles([UserRole.ADMIN, UserRole.SHOP_OPERATOR, UserRole.PRINT_DEVICE]))
+) -> ShopSettingsResponse:
+    """
+    Update shop configuration settings including print history retention hours (1, 2, 4, 6, 8 hours)
+    and optional geographic coordinates or address.
+    Enforces strict ownership: operator must own shop, device must belong to shop.
+    """
+    shop = await ShopRepository(db).get_by_id(shop_id)
+    if not shop:
+        raise PrivPrintException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code=ErrorCode.NOT_FOUND,
+            message=f"Shop {shop_id} not found"
+        )
+
+    if principal.role != UserRole.ADMIN:
+        if principal.role == UserRole.SHOP_OPERATOR:
+            if shop.owner_id != principal.user_id:
+                raise PrivPrintException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code=ErrorCode.FORBIDDEN,
+                    message="Access denied: operator does not own this shop"
+                )
+        elif principal.role == UserRole.PRINT_DEVICE:
+            if principal.shop_id != shop_id:
+                raise PrivPrintException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code=ErrorCode.FORBIDDEN,
+                    message="Access denied: device belongs to a different shop"
+                )
+
+    if payload.history_retention_hours is not None:
+        shop.history_retention_hours = payload.history_retention_hours
+    if payload.clear_location:
+        shop.latitude = None
+        shop.longitude = None
+    else:
+        if (payload.latitude is not None and payload.longitude is None) or (payload.latitude is None and payload.longitude is not None):
+            raise PrivPrintException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code=ErrorCode.VALIDATION_ERROR,
+                message="Both latitude and longitude must be provided together"
+            )
+        if payload.latitude is not None and payload.longitude is not None:
+            shop.latitude = payload.latitude
+            shop.longitude = payload.longitude
+        if payload.address is not None and payload.address.strip():
+            shop.address = payload.address.strip()
+
+    await db.commit()
+    await db.refresh(shop)
+
+    return ShopSettingsResponse(
+        shop_id=shop.id,
+        history_retention_hours=shop.history_retention_hours,
+        latitude=shop.latitude,
+        longitude=shop.longitude,
+        address=shop.address,
+        location_enabled=(shop.latitude is not None and shop.longitude is not None),
+    )
+
+
+@router.put("/{shop_id}/location", response_model=ShopResponse)
+@router.patch("/{shop_id}/location", response_model=ShopResponse)
+async def update_shop_location(
+    shop_id: str,
+    payload: ShopLocationUpdateRequest,
+    db: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(require_roles([UserRole.ADMIN, UserRole.SHOP_OPERATOR, UserRole.PRINT_DEVICE]))
+) -> ShopResponse:
+    """
+    Update shop geographic location coordinates and customer-facing address.
+    Enforces strict ownership: derived from authenticated session/token.
+    """
+    target_shop_id = shop_id
+    if principal.role != UserRole.ADMIN:
+        if principal.role == UserRole.SHOP_OPERATOR:
+            if principal.shop_id and principal.shop_id != shop_id:
+                raise PrivPrintException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code=ErrorCode.FORBIDDEN,
+                    message="Access denied: operator does not own this shop"
+                )
+            target_shop_id = principal.shop_id or shop_id
+        elif principal.role == UserRole.PRINT_DEVICE:
+            if principal.shop_id != shop_id:
+                raise PrivPrintException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code=ErrorCode.FORBIDDEN,
+                    message="Access denied: device belongs to a different shop"
+                )
+            target_shop_id = principal.shop_id
+
+    shop = await ShopRepository(db).get_by_id(target_shop_id)
+    if not shop:
+        raise PrivPrintException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code=ErrorCode.NOT_FOUND,
+            message=f"Shop {target_shop_id} not found"
+        )
+
+    if principal.role == UserRole.SHOP_OPERATOR and shop.owner_id != principal.user_id:
+        raise PrivPrintException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code=ErrorCode.FORBIDDEN,
+            message="Access denied: operator does not own this shop"
+        )
+
+    if payload.clear_location:
+        shop.latitude = None
+        shop.longitude = None
+    else:
+        if payload.latitude is None or payload.longitude is None:
+            raise PrivPrintException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code=ErrorCode.VALIDATION_ERROR,
+                message="Latitude and longitude are required when not clearing location"
+            )
+        shop.latitude = payload.latitude
+        shop.longitude = payload.longitude
+        if payload.address and payload.address.strip():
+            shop.address = payload.address.strip()
+        if principal.role == UserRole.PRINT_DEVICE:
+            shop.is_online = True
+
+    await db.commit()
+    await db.refresh(shop)
+
+    return ShopResponse.model_validate(shop)

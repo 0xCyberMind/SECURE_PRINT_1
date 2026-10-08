@@ -138,7 +138,7 @@ fun DocumentPickerScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = if (selectedDocs.size > 1) "Selected Batch (${selectedDocs.size} files)" else "Select Documents",
+                        text = "Choose documents",
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                     )
                 },
@@ -196,11 +196,6 @@ fun DocumentPickerScreen(
             if (selectedDocs.isNotEmpty()) {
                 val totalBytes = selectedDocs.sumOf { it.sizeBytes }
                 val totalPages = selectedDocs.sumOf { it.pageCount }
-                val formattedTotalSize = when {
-                    totalBytes < 1024 -> "$totalBytes B"
-                    totalBytes < 1024 * 1024 -> "${totalBytes / 1024} KB"
-                    else -> "%.1f MB".format(totalBytes.toDouble() / (1024 * 1024))
-                }
 
                 PrivPrintCard(
                     containerColor = MaterialTheme.colorScheme.surface,
@@ -214,12 +209,12 @@ fun DocumentPickerScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Ready to Print (${selectedDocs.size} file${if (selectedDocs.size > 1) "s" else ""})",
+                                    text = "Ready to Print",
                                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "$formattedTotalSize total • $totalPages total pages",
+                                    text = "${selectedDocs.size} documents • $totalPages pages",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -259,7 +254,7 @@ fun DocumentPickerScreen(
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "${index + 1}. ${doc.name}",
+                                        text = doc.name,
                                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                                         color = MaterialTheme.colorScheme.onSurface,
                                         maxLines = 1,
@@ -294,7 +289,7 @@ fun DocumentPickerScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             PrivPrintOutlinedButton(
-                                text = "Add More",
+                                text = "+ Add Documents",
                                 icon = Icons.Default.Add,
                                 onClick = { docPickerLauncher.launch("*/*") },
                                 modifier = Modifier.weight(1f)
@@ -343,20 +338,26 @@ fun DocumentPickerScreen(
                         }
                         Spacer(modifier = Modifier.height(14.dp))
                         Text(
-                            text = "Choose Document(s) to Print",
+                            text = "Choose documents",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Select one or multiple files (PDF, DOCX, Images)",
+                            text = "Select one or more files to print",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Up to 10 files • 50 MB maximum",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(modifier = Modifier.height(18.dp))
 
                         PrivPrintPrimaryButton(
-                            text = "Browse Files (Multi-Select)",
+                            text = "+ Add Documents",
                             icon = Icons.Default.AttachFile,
                             onClick = { docPickerLauncher.launch("*/*") },
                             modifier = Modifier.fillMaxWidth(),
@@ -368,7 +369,7 @@ fun DocumentPickerScreen(
 
 
             // Quick Sample Documents for test execution
-            PrivPrintSectionHeader(title = "Or select a test document:")
+            PrivPrintSectionHeader(title = "Sample Files")
 
             sampleDocuments.forEach { doc ->
                 val isSelected = selectedDocs.contains(doc)

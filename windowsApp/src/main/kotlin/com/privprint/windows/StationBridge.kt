@@ -58,6 +58,9 @@ data class ShopDetails(
     val address: String,
     val permanentQrPayload: String,
     val verified: Boolean,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val locationEnabled: Boolean = false,
 )
 
 data class PrinterStatus(
@@ -133,10 +136,16 @@ data class StationStatus(
     val connectionError: String = "",
     val workerExecutable: String = "",
     val autoPrintEnabled: Boolean = false,
+    val historyRetentionHours: Int = 4,
     val printers: List<PrinterStatus> = emptyList(),
     val auditLog: List<AuditEvent> = emptyList(),
     val activeJobCount: Int = 0,
     val completedJobCount: Int = 0,
+    val shopName: String = "",
+    val shopAddress: String = "",
+    val shopLatitude: Double? = null,
+    val shopLongitude: Double? = null,
+    val locationEnabled: Boolean = false,
 )
 
 private data class StoredStationCredentials(
@@ -148,6 +157,7 @@ private data class StoredStationCredentials(
     val privateKey: String = "",
     val publicKey: String = "",
     val autoPrintEnabled: Boolean = false,
+    val historyRetentionHours: Int = 4,
 )
 
 private data class LocalPrinter(
@@ -197,6 +207,7 @@ class StationBridge {
     @Volatile private var keyRegistered = false
     @Volatile private var lastPrinters = emptyList<PrinterStatus>()
     @Volatile private var lastJobCount = 0
+    @Volatile private var cachedShopDetails: ShopDetails? = null
 
     fun start() {
         if (!System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
@@ -208,6 +219,7 @@ class StationBridge {
             privateKey = decodePrivateKey(saved.privateKey)
             refreshStationTokenIfNeeded()
             registerPrintKey()
+            runCatching { cachedShopDetails = shopDetails() }
             openRealtime()
             startBackgroundLoops()
             runCatching { refreshPrinters() }.onFailure {
@@ -332,13 +344,80 @@ class StationBridge {
         } else {
             shop.stringOrEmpty("permanent_qr_payload")
         }
-        return ShopDetails(
+        val lat = shop.get("latitude")?.takeIf { !it.isJsonNull }?.asDouble
+        val lng = shop.get("longitude")?.takeIf { !it.isJsonNull }?.asDouble
+        val hasLoc = lat != null && lng != null && lat in -90.0..90.0 && lng in -180.0..180.0
+        val details = ShopDetails(
             id = shop.stringOrEmpty("id"),
             name = shop.stringOrEmpty("name"),
             address = shop.stringOrEmpty("address"),
             permanentQrPayload = qr,
             verified = shop.get("is_verified")?.asBoolean ?: false,
+            latitude = lat,
+            longitude = lng,
+            locationEnabled = hasLoc,
         )
+        cachedShopDetails = details
+        return details
+    }
+
+    fun detectCurrentLocation(): Pair<Double, Double>? {
+        val endpoints = listOf(
+            "https://ipapi.co/json",
+            "https://ipwho.is/"
+        )
+        for (url in endpoints) {
+            try {
+                val req = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "PrivPrintStation/1.0")
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string().orEmpty()
+                        val json = JsonParser.parseString(body).asJsonObject
+                        val lat = json.get("lat")?.takeIf { !it.isJsonNull }?.asDouble
+                            ?: json.get("latitude")?.takeIf { !it.isJsonNull }?.asDouble
+                        val lon = json.get("lon")?.takeIf { !it.isJsonNull }?.asDouble
+                            ?: json.get("longitude")?.takeIf { !it.isJsonNull }?.asDouble
+                        if (lat != null && lon != null && lat in -90.0..90.0 && lon in -180.0..180.0) {
+                            return Pair(lat, lon)
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        return null
+    }
+
+    fun updateShopLocation(lat: Double, lng: Double, address: String? = null): ShopDetails {
+        require(lat in -90.0..90.0) { "Latitude must be between -90 and 90" }
+        require(lng in -180.0..180.0) { "Longitude must be between -180 and 180" }
+        val current = requireCredentials()
+        val payload = JsonObject().apply {
+            addProperty("latitude", lat)
+            addProperty("longitude", lng)
+            if (!address.isNullOrBlank()) {
+                addProperty("address", address.trim())
+            }
+        }
+        put("/api/v1/shops/${encodePath(current.shopId)}/location", payload)
+        recordAudit("LOCATION_UPDATED", "Shop coordinates updated: $lat, $lng", "INFO")
+        val refreshed = shopDetails()
+        cachedShopDetails = refreshed
+        return refreshed
+    }
+
+    fun disableShopLocation(): ShopDetails {
+        val current = requireCredentials()
+        val payload = JsonObject().apply {
+            addProperty("clear_location", true)
+        }
+        put("/api/v1/shops/${encodePath(current.shopId)}/location", payload)
+        recordAudit("LOCATION_DISABLED", "Shop location disabled for discovery", "INFO")
+        val refreshed = shopDetails()
+        cachedShopDetails = refreshed
+        return refreshed
     }
 
     fun setAutoPrintEnabled(enabled: Boolean) {
@@ -348,8 +427,19 @@ class StationBridge {
         if (enabled) pollAndProcessAuthorizedJobs()
     }
 
+    fun setHistoryRetentionHours(hours: Int) {
+        require(hours in listOf(1, 2, 4, 6, 8)) { "Retention hours must be 1, 2, 4, 6, or 8" }
+        val current = requireCredentials()
+        val body = JsonObject().apply { addProperty("history_retention_hours", hours) }
+        patch("/api/v1/shops/${encodePath(current.shopId)}/settings", body)
+        val saved = current.copy(historyRetentionHours = hours)
+        credentials = saved
+        saveCredentials()
+    }
+
     fun status(): StationStatus {
         val saved = credentials
+        val details = cachedShopDetails
         return StationStatus(
             authenticated = saved != null && saved.deviceId.isNotBlank() && saved.accessToken.isNotBlank(),
             shopId = saved?.shopId.orEmpty(),
@@ -361,10 +451,16 @@ class StationBridge {
             connectionError = connectionError,
             workerExecutable = "",
             autoPrintEnabled = saved?.autoPrintEnabled ?: true,
+            historyRetentionHours = saved?.historyRetentionHours ?: 4,
             printers = lastPrinters,
             auditLog = synchronized(auditEvents) { auditEvents.reversed().toList() },
             activeJobCount = processingJobs.size,
             completedJobCount = lastJobCount,
+            shopName = details?.name.orEmpty(),
+            shopAddress = details?.address.orEmpty(),
+            shopLatitude = details?.latitude,
+            shopLongitude = details?.longitude,
+            locationEnabled = details?.locationEnabled ?: false,
         )
     }
 
@@ -1181,6 +1277,11 @@ class StationBridge {
     private fun put(path: String, payload: JsonObject) {
         val body = gson.toJson(payload).toRequestBody("application/json".toMediaType())
         executeText(Request.Builder().url(baseUrl + path).put(body), null)
+    }
+
+    private fun patch(path: String, payload: JsonObject): JsonObject {
+        val body = gson.toJson(payload).toRequestBody("application/json".toMediaType())
+        return execute(Request.Builder().url(baseUrl + path).patch(body), null)
     }
 
     private fun getBytes(path: String): DownloadedDocument {

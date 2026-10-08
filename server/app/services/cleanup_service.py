@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Tuple, Dict, Any, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
@@ -9,7 +9,13 @@ from app.models.entities import Document, PrintJob, Session, AuditLog
 from app.models.enums import PrintJobStatus, CleanupState, AuditSeverity, SessionStatus
 from app.services.storage import get_storage_service, StorageService
 from app.services.redis_service import get_redis_service
-from app.schemas.cleanup import CleanupResponse, CleanupStatusResponse, CleanupSweepResponse
+from app.schemas.cleanup import (
+    CleanupResponse,
+    CleanupStatusResponse,
+    CleanupSweepResponse,
+    HistoryCleanupResponse,
+    HistoryCleanupSweepResponse,
+)
 from app.core.exceptions import PrivPrintException, ErrorCode
 
 logger = logging.getLogger("privprint.cleanup")
@@ -381,4 +387,122 @@ class DocumentCleanupService:
             retained_documents=retained,
             failed_documents=failed,
             details=details
+        )
+
+    async def cleanup_history_for_shop(
+        self,
+        shop_id: str,
+        now_override: Optional[datetime] = None
+    ) -> HistoryCleanupResponse:
+        """
+        Evaluates and deletes completed print jobs for a specific shop that exceed
+        the shop's configured history retention policy.
+        Never touches active, pending, or printing jobs.
+        """
+        now_utc = now_override or datetime.now(timezone.utc)
+        if now_utc.tzinfo is None:
+            now_utc = now_utc.replace(tzinfo=timezone.utc)
+
+        # 1. Fetch shop and retention policy
+        from app.models.entities import Shop
+        shop_query = select(Shop).where(Shop.id == shop_id)
+        res = await self.db.execute(shop_query)
+        shop = res.scalar_one_or_none()
+
+        retention_hours = shop.history_retention_hours if shop and shop.history_retention_hours else 4
+
+        # 2. Query completed jobs for this shop
+        job_query = select(PrintJob).where(
+            and_(
+                PrintJob.shop_id == shop_id,
+                PrintJob.status == PrintJobStatus.COMPLETED.value
+            )
+        )
+        res = await self.db.execute(job_query)
+        completed_jobs = res.scalars().all()
+
+        deleted_job_ids: List[str] = []
+        retained_count = 0
+
+        for job in completed_jobs:
+            if not job.completed_at:
+                retained_count += 1
+                continue
+
+            comp_time = job.completed_at if job.completed_at.tzinfo else job.completed_at.replace(tzinfo=timezone.utc)
+            expiry_time = comp_time + timedelta(hours=retention_hours)
+
+            if expiry_time <= now_utc:
+                # Job history has expired under shop retention policy
+                deleted_job_ids.append(job.id)
+
+                # Record audit entry
+                audit = AuditLog(
+                    event_type="PRINT_HISTORY_EXPIRED",
+                    severity=AuditSeverity.INFO.value,
+                    user_id=job.user_id,
+                    job_id=job.id,
+                    details=json.dumps({
+                        "job_id": job.id,
+                        "shop_id": job.shop_id,
+                        "completed_at": comp_time.isoformat(),
+                        "retention_hours": retention_hours,
+                        "action": "AUTO_DELETED_FROM_HISTORY"
+                    })
+                )
+                self.db.add(audit)
+                await self.db.delete(job)
+            else:
+                retained_count += 1
+
+        if deleted_job_ids:
+            await self.db.commit()
+            for j_id in deleted_job_ids:
+                try:
+                    await self.redis.publish_shop_event(
+                        shop_id,
+                        "PRINT_HISTORY_DELETED",
+                        {"job_id": j_id, "shop_id": shop_id}
+                    )
+                except Exception:
+                    pass
+
+        return HistoryCleanupResponse(
+            shop_id=shop_id,
+            deleted_job_ids=deleted_job_ids,
+            deleted_count=len(deleted_job_ids),
+            retained_count=retained_count,
+            retention_hours=retention_hours,
+            cleaned_at=now_utc
+        )
+
+    async def run_history_cleanup_sweep(
+        self,
+        now_override: Optional[datetime] = None
+    ) -> HistoryCleanupSweepResponse:
+        """
+        Global history cleanup sweep. Scans each shop independently and enforces
+        its configured history retention policy.
+        """
+        from app.models.entities import Shop
+        res = await self.db.execute(select(Shop.id))
+        shop_ids = res.scalars().all()
+
+        total_scanned = 0
+        total_deleted = 0
+        total_retained = 0
+        details: Dict[str, HistoryCleanupResponse] = {}
+
+        for s_id in shop_ids:
+            shop_res = await self.cleanup_history_for_shop(s_id, now_override=now_override)
+            details[s_id] = shop_res
+            total_deleted += shop_res.deleted_count
+            total_retained += shop_res.retained_count
+            total_scanned += (shop_res.deleted_count + shop_res.retained_count)
+
+        return HistoryCleanupSweepResponse(
+            total_scanned_jobs=total_scanned,
+            total_deleted_jobs=total_deleted,
+            total_retained_jobs=total_retained,
+            details_by_shop=details
         )

@@ -119,7 +119,7 @@ fun ShopConnectedScreen(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "${shop.address} • Terminal ID: ${shop.id}",
+                    text = "Verified Xerox Partner",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -170,7 +170,7 @@ fun ShopConnectedScreen(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "AES-256 Protected",
+                            text = "Protected",
                             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                             color = Color(0xFF059669)
                         )
@@ -183,7 +183,7 @@ fun ShopConnectedScreen(
 
         // Actions: Select Document to Print & Disconnect
         PrivPrintPrimaryButton(
-            text = "Select Document to Print",
+            text = "Choose Documents",
             icon = Icons.Default.Description,
             onClick = onSelectDocumentClick,
             modifier = Modifier.fillMaxWidth(),
