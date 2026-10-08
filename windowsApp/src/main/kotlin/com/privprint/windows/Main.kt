@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,6 +30,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -540,6 +542,9 @@ private fun StationApplication(bridge: StationBridge, initialStatus: StationStat
     var autoPrintBusy  by remember { mutableStateOf(false) }
     var loggedOut      by remember { mutableStateOf(false) }
     var statusError    by remember { mutableStateOf<String?>(null) }
+    var newJobNotification by remember { mutableStateOf<PrintJobStatus?>(null) }
+    val seenJobIds = remember { mutableSetOf<String>() }
+    var initialQueueLoaded by remember { mutableStateOf(false) }
 
     // Dialog & Inspection State
     var viewingJob      by remember { mutableStateOf<PrintJobDetail?>(null) }
@@ -570,7 +575,20 @@ private fun StationApplication(bridge: StationBridge, initialStatus: StationStat
     suspend fun refreshQueue(showLoading: Boolean = true) {
         if (showLoading) queueBusy = true
         try {
-            queue = withContext(Dispatchers.IO) { bridge.queue() }
+            val fetched = withContext(Dispatchers.IO) { bridge.queue() }
+            if (!initialQueueLoaded) {
+                seenJobIds.addAll(fetched.map { it.id })
+                initialQueueLoaded = true
+            } else {
+                val brandNew = fetched.filter { it.status in NEW_PENDING_STATUSES && !seenJobIds.contains(it.id) }
+                if (brandNew.isNotEmpty()) {
+                    brandNew.forEach { seenJobIds.add(it.id) }
+                    val latest = brandNew.last()
+                    runCatching { java.awt.Toolkit.getDefaultToolkit().beep() }
+                    newJobNotification = latest
+                }
+            }
+            queue = fetched
             queueError = null
         } catch (ex: Exception) {
             queueError = ex.message ?: "Could not load the shop print queue."
@@ -622,6 +640,25 @@ private fun StationApplication(bridge: StationBridge, initialStatus: StationStat
 
     // Initial data load and background polling
     LaunchedEffect(Unit) {
+        bridge.onRealtimeEvent = { eventType, data ->
+            scope.launch {
+                when (eventType) {
+                    "JOB_CREATED" -> {
+                        val jobId = data.get("job_id")?.takeIf { it.isJsonPrimitive && !it.isJsonNull }?.asString.orEmpty()
+                        refreshQueue(showLoading = false)
+                        val incoming = queue.firstOrNull { it.id == jobId }
+                        if (incoming != null && seenJobIds.add(incoming.id)) {
+                            runCatching { java.awt.Toolkit.getDefaultToolkit().beep() }
+                            newJobNotification = incoming
+                        }
+                    }
+                    "JOB_AUTHORIZED", "JOB_COMPLETED", "JOB_FAILED", "JOB_CANCELLED", "PRINT_STARTED", "PRINT_HISTORY_DELETED" -> {
+                        refreshQueue(showLoading = false)
+                    }
+                }
+            }
+        }
+
         runCatching { refreshStatus() }
             .onSuccess {
                 if (status?.authenticated == true) {
@@ -636,6 +673,13 @@ private fun StationApplication(bridge: StationBridge, initialStatus: StationStat
             if (status?.authenticated == true) {
                 runCatching { refreshQueue(showLoading = false) }
             }
+        }
+    }
+
+    LaunchedEffect(newJobNotification) {
+        if (newJobNotification != null) {
+            delay(15_000)
+            newJobNotification = null
         }
     }
 
@@ -1020,6 +1064,23 @@ private fun StationApplication(bridge: StationBridge, initialStatus: StationStat
                     statusError?.let { ModernNotice(it, isError = true) }
                     actionMessage?.let { ModernNotice(it, isError = it.contains("fail", true) || it.contains("could not", true)) }
 
+                    newJobNotification?.let { newJob ->
+                        NewJobBanner(
+                            job = newJob,
+                            onAccept = {
+                                newJobNotification = null
+                                onAcceptJob(newJob)
+                            },
+                            onViewInQueue = {
+                                newJobNotification = null
+                                selectedPage = StationPage.QUEUE
+                            },
+                            onDismiss = {
+                                newJobNotification = null
+                            }
+                        )
+                    }
+
                     when (selectedPage) {
                         StationPage.OVERVIEW  -> OverviewPage(
                             status, shop, queue, autoPrintBusy,
@@ -1043,7 +1104,10 @@ private fun StationApplication(bridge: StationBridge, initialStatus: StationStat
                             onDetailsJob    = onDetailsJob,
                         )
                         StationPage.QUEUE     -> PrintQueuePage(
-                            queue, queueBusy, queueError,
+                            queue           = queue,
+                            busy            = queueBusy,
+                            error           = queueError,
+                            stationOnline   = status?.realtimeConnected ?: false,
                             onVerify        = onVerifyJob,
                             onAccept        = onAcceptJob,
                             onCancel        = onCancelJob,
@@ -1513,14 +1577,144 @@ private fun EnterpriseMetricCard(
 }
 
 // ─── Print Queue Screen (Enterprise Table Experience) ─────────────────────────
-private val ACTIVE_STATUSES = setOf("AUTHORIZED", "PENDING", "PRINTING", "ACCEPTED")
-private val DONE_STATUSES   = setOf("COMPLETED", "FAILED", "CANCELLED", "EXPIRED")
+private val NEW_PENDING_STATUSES = setOf("CREATED", "QUEUED", "AUTHORIZED", "PENDING", "ACCEPTED")
+private val PRINTING_STATUSES    = setOf("PRINTING")
+private val COMPLETED_STATUSES   = setOf("COMPLETED")
+private val FAILED_STATUSES      = setOf("FAILED", "CANCELLED", "EXPIRED")
+private val ACTIVE_STATUSES      = setOf("CREATED", "QUEUED", "AUTHORIZED", "PENDING", "PRINTING", "ACCEPTED")
+private val DONE_STATUSES        = setOf("COMPLETED", "FAILED", "CANCELLED", "EXPIRED")
+
+private fun formatAutoDeleteCountdown(completedAtStr: String?, retentionHours: Int, nowEpochMillis: Long): String {
+    if (completedAtStr.isNullOrBlank()) return "Auto-deletes in ${retentionHours}h"
+    return try {
+        val normalized = if (!completedAtStr.endsWith("Z") && !completedAtStr.contains("+")) {
+            completedAtStr + "Z"
+        } else completedAtStr
+        val completedInstant = java.time.Instant.parse(normalized)
+        val expiryMillis = completedInstant.toEpochMilli() + (retentionHours * 3600L * 1000L)
+        val remainingMillis = expiryMillis - nowEpochMillis
+        if (remainingMillis <= 0) {
+            "Deleting now..."
+        } else {
+            val totalSeconds = remainingMillis / 1000
+            val hours = totalSeconds / 3600
+            val minutes = (totalSeconds % 3600) / 60
+            val seconds = totalSeconds % 60
+            when {
+                hours > 0 -> "Auto-deletes in ${hours}h ${minutes}m"
+                minutes > 0 -> "Auto-deletes in ${minutes}m ${seconds}s"
+                else -> "Auto-deletes in ${seconds}s"
+            }
+        }
+    } catch (_: Exception) {
+        "Auto-deletes in ${retentionHours}h"
+    }
+}
+
+private fun formatRelativeTime(dateStr: String?): String {
+    if (dateStr.isNullOrBlank()) return "Just now"
+    return try {
+        val normalized = if (!dateStr.endsWith("Z") && !dateStr.contains("+")) {
+            dateStr + "Z"
+        } else dateStr
+        val instant = java.time.Instant.parse(normalized)
+        val diffSec = maxOf(0L, (System.currentTimeMillis() - instant.toEpochMilli()) / 1000)
+        when {
+            diffSec < 60 -> "Just now"
+            diffSec < 3600 -> "${diffSec / 60}m ago"
+            diffSec < 86400 -> "${diffSec / 3600}h ago"
+            else -> "${diffSec / 86400}d ago"
+        }
+    } catch (_: Exception) {
+        dateStr.take(16).replace("T", " ")
+    }
+}
+
+@Composable
+private fun NewJobBanner(
+    job: PrintJobStatus,
+    onAccept: () -> Unit,
+    onViewInQueue: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = BrandBlueLight),
+        shape = RoundedCornerShape(12.dp),
+        border = androidx.compose.foundation.BorderStroke(1.5.dp, BrandBlue),
+        elevation = CardDefaults.cardElevation(4.dp),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Box(
+                    Modifier.size(40.dp).clip(CircleShape).background(BrandBlue),
+                    contentAlignment = Alignment.Center
+                ) {
+                    StationIcons.PrintQueue(modifier = Modifier.size(20.dp), color = PureWhite)
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("NEW PRINT JOB RECEIVED", color = BrandBlueHover, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+                        Box(Modifier.clip(RoundedCornerShape(4.dp)).background(BrandBlue).padding(horizontal = 6.dp, vertical = 1.dp)) {
+                            Text("${job.copies} COPIES", color = PureWhite, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Text(
+                        "${job.documentName} • ${job.colorMode} • ${job.paperSize} (${job.customerName ?: "Customer #${job.id.takeLast(4)}"})",
+                        color = Slate900,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onAccept,
+                    colors = ButtonDefaults.buttonColors(BrandBlue, PureWhite),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.height(34.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        StationIcons.Check(modifier = Modifier.size(12.dp), color = PureWhite)
+                        Text("Accept & Print", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                OutlinedButton(
+                    onClick = onViewInQueue,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.height(34.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = BrandBlueHover),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BrandBlueBorder)
+                ) {
+                    Text("View in Queue", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.height(34.dp)
+                ) {
+                    Text("✕", fontSize = 14.sp, color = Slate500, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun PrintQueuePage(
     queue: List<PrintJobStatus>,
     busy: Boolean,
     error: String?,
+    stationOnline: Boolean,
     onVerify: (PrintJobStatus) -> Unit,
     onAccept: (PrintJobStatus) -> Unit,
     onCancel: (PrintJobStatus) -> Unit,
@@ -1531,116 +1725,324 @@ private fun PrintQueuePage(
 ) {
     var selectedFilter by remember { mutableStateOf("ALL") }
     var searchQuery by remember { mutableStateOf("") }
+    var currentTimeMillis by remember { mutableStateOf(System.currentTimeMillis()) }
 
-    val activeCount    = queue.count { it.status in ACTIVE_STATUSES }
-    val completedCount = queue.count { it.status == "COMPLETED" }
-    val failedCount    = queue.count { it.status in setOf("FAILED", "CANCELLED", "EXPIRED") }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_000)
+            currentTimeMillis = System.currentTimeMillis()
+        }
+    }
+
+    val newPendingJobs = queue.filter { it.status in NEW_PENDING_STATUSES }
+    val printingJobs   = queue.filter { it.status in PRINTING_STATUSES }
+    val completedJobs  = queue.filter { it.status in COMPLETED_STATUSES }
+    val failedJobs     = queue.filter { it.status in FAILED_STATUSES }
+
+    val newPendingCount = newPendingJobs.size
+    val printingCount   = printingJobs.size
+    val completedCount  = completedJobs.size
+    val failedCount     = failedJobs.size
 
     val filteredQueue = remember(queue, selectedFilter, searchQuery) {
         queue.filter { job ->
             val matchesFilter = when (selectedFilter) {
-                "ACTIVE"    -> job.status in ACTIVE_STATUSES
-                "COMPLETED" -> job.status == "COMPLETED"
-                "FAILED"    -> job.status in setOf("FAILED", "CANCELLED", "EXPIRED")
+                "NEW"       -> job.status in NEW_PENDING_STATUSES
+                "PRINTING"  -> job.status in PRINTING_STATUSES
+                "COMPLETED" -> job.status in COMPLETED_STATUSES
+                "FAILED"    -> job.status in FAILED_STATUSES
                 else        -> true
             }
             val matchesSearch = searchQuery.isBlank() ||
                 job.documentName.contains(searchQuery, ignoreCase = true) ||
+                (job.customerName?.contains(searchQuery, ignoreCase = true) == true) ||
                 job.id.contains(searchQuery, ignoreCase = true)
             matchesFilter && matchesSearch
         }
     }
 
-    // Filter Tabs & Search Header Row
-    Row(
-        Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            QueueFilterTab("All Jobs", queue.size, selectedFilter == "ALL") { selectedFilter = "ALL" }
-            QueueFilterTab("Active & Pending", activeCount, selectedFilter == "ACTIVE", BrandBlue) { selectedFilter = "ACTIVE" }
-            QueueFilterTab("Completed", completedCount, selectedFilter == "COMPLETED", Emerald) { selectedFilter = "COMPLETED" }
-            QueueFilterTab("Failed / Cancelled", failedCount, selectedFilter == "FAILED", Rose) { selectedFilter = "FAILED" }
-        }
-
-        // Search Input
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it },
-            placeholder = { Text("Search by document or Job ID…", fontSize = 12.sp, color = Slate400) },
-            singleLine = true,
-            modifier = Modifier.width(280.dp).height(40.dp),
-            colors = TextFieldDefaults.colors(
-                focusedContainerColor = PureWhite,
-                unfocusedContainerColor = PureWhite,
-                focusedIndicatorColor = BrandBlue,
-                unfocusedIndicatorColor = Slate200,
-            ),
-            shape = RoundedCornerShape(8.dp),
-        )
-    }
-
-    jobDetailError?.let { ModernNotice(it, isError = true) }
-
-    when {
-        busy && queue.isEmpty() -> {
-            // Skeleton Loading State
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                repeat(4) {
-                    Box(
-                        Modifier.fillMaxWidth().height(72.dp).clip(RoundedCornerShape(12.dp))
-                            .background(Slate100)
-                            .border(1.dp, Slate200, RoundedCornerShape(12.dp))
-                    )
-                }
-            }
-        }
-        error != null -> {
-            ModernNotice(error, isError = true)
-        }
-        filteredQueue.isEmpty() -> {
-            // Empty State
-            Card(
-                Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(PureWhite),
-                shape = RoundedCornerShape(14.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Slate200),
-            ) {
-                Column(
-                    Modifier.fillMaxWidth().padding(48.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        // ── Top Summary Header Card ──
+        Card(
+            Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(PureWhite),
+            shape = RoundedCornerShape(14.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Slate200),
+            elevation = CardDefaults.cardElevation(1.dp)
+        ) {
+            Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Box(Modifier.size(48.dp).clip(CircleShape).background(Slate100), contentAlignment = Alignment.Center) {
-                        StationIcons.PrintQueue(modifier = Modifier.size(24.dp), color = Slate400)
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Print Queue Management", color = Slate900, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                        Text("Review customer jobs, manage hardware spooling, and monitor automated history deletion.", color = Slate500, fontSize = 13.sp)
                     }
-                    Text("No print jobs found", color = Slate900, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Text(
-                        if (searchQuery.isNotBlank()) "No jobs match your search query '$searchQuery'."
-                        else "There are currently no print jobs matching the selected filter.",
-                        color = Slate500, fontSize = 13.sp, textAlign = TextAlign.Center
-                    )
-                    OutlinedButton(onClick = onRefresh, shape = RoundedCornerShape(8.dp)) {
-                        Text("Refresh Queue", fontSize = 12.sp)
+                    Box(
+                        Modifier.clip(RoundedCornerShape(20.dp))
+                            .background(if (stationOnline) EmeraldLight else RoseLight)
+                            .border(1.dp, if (stationOnline) EmeraldBorder else RoseBorder, RoundedCornerShape(20.dp))
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Box(Modifier.size(8.dp).clip(CircleShape).background(if (stationOnline) Emerald else Rose))
+                            Text(if (stationOnline) "Station Online" else "Station Offline", color = if (stationOnline) Emerald else Rose, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                // 4 Real Metrics Cards
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    QueueMetricCard("NEW / PENDING", newPendingCount, "Awaiting approval", BrandBlue, selectedFilter == "NEW") {
+                        selectedFilter = if (selectedFilter == "NEW") "ALL" else "NEW"
+                    }
+                    QueueMetricCard("PRINTING", printingCount, "Spooling hardware", Amber, selectedFilter == "PRINTING") {
+                        selectedFilter = if (selectedFilter == "PRINTING") "ALL" else "PRINTING"
+                    }
+                    QueueMetricCard("COMPLETED", completedCount, "Auto-deleting retention", Emerald, selectedFilter == "COMPLETED") {
+                        selectedFilter = if (selectedFilter == "COMPLETED") "ALL" else "COMPLETED"
+                    }
+                    QueueMetricCard("FAILED / REJECTED", failedCount, "Errors & cancellations", Rose, selectedFilter == "FAILED") {
+                        selectedFilter = if (selectedFilter == "FAILED") "ALL" else "FAILED"
                     }
                 }
             }
         }
-        else -> {
-            // Table-like Job Cards List
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                filteredQueue.forEach { job ->
-                    JobRowItem(
-                        job = job,
-                        onVerify = onVerify,
-                        onAccept = onAccept,
-                        onCancel = onCancel,
-                        onDetails = onDetails,
-                        compact = false
-                    )
+
+        // ── Filter Tabs & Search Bar Row ──
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                QueueFilterTab("All Jobs", queue.size, selectedFilter == "ALL") { selectedFilter = "ALL" }
+                QueueFilterTab("New", newPendingCount, selectedFilter == "NEW", BrandBlue) { selectedFilter = "NEW" }
+                QueueFilterTab("Printing", printingCount, selectedFilter == "PRINTING", Amber) { selectedFilter = "PRINTING" }
+                QueueFilterTab("Completed", completedCount, selectedFilter == "COMPLETED", Emerald) { selectedFilter = "COMPLETED" }
+                QueueFilterTab("Failed / Cancelled", failedCount, selectedFilter == "FAILED", Rose) { selectedFilter = "FAILED" }
+            }
+
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Search by document, customer, or ID…", fontSize = 12.sp, color = Slate400) },
+                singleLine = true,
+                modifier = Modifier.width(300.dp).height(40.dp),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = PureWhite,
+                    unfocusedContainerColor = PureWhite,
+                    focusedIndicatorColor = BrandBlue,
+                    unfocusedIndicatorColor = Slate200,
+                ),
+                shape = RoundedCornerShape(8.dp),
+            )
+        }
+
+        jobDetailError?.let { ModernNotice(it, isError = true) }
+
+        when {
+            busy && queue.isEmpty() -> {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    repeat(4) {
+                        Box(
+                            Modifier.fillMaxWidth().height(80.dp).clip(RoundedCornerShape(12.dp))
+                                .background(Slate100)
+                                .border(1.dp, Slate200, RoundedCornerShape(12.dp))
+                        )
+                    }
                 }
             }
+            error != null -> {
+                ModernNotice(error, isError = true)
+            }
+            filteredQueue.isEmpty() -> {
+                Card(
+                    Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(PureWhite),
+                    shape = RoundedCornerShape(14.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Slate200),
+                ) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(48.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(Modifier.size(48.dp).clip(CircleShape).background(Slate100), contentAlignment = Alignment.Center) {
+                            StationIcons.PrintQueue(modifier = Modifier.size(24.dp), color = Slate400)
+                        }
+                        Text("No print jobs found", color = Slate900, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text(
+                            if (searchQuery.isNotBlank()) "No jobs match your search query '$searchQuery'."
+                            else "There are currently no print jobs matching the selected filter.",
+                            color = Slate500, fontSize = 13.sp, textAlign = TextAlign.Center
+                        )
+                        OutlinedButton(onClick = onRefresh, shape = RoundedCornerShape(8.dp)) {
+                            Text("Refresh Queue", fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+            selectedFilter == "ALL" && searchQuery.isBlank() -> {
+                Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                    if (newPendingJobs.isNotEmpty()) {
+                        QueueSectionGroup(
+                            title = "NEW / PENDING JOBS",
+                            count = newPendingJobs.size,
+                            subtitle = "Incoming customer print requests awaiting operator acceptance",
+                            accentColor = BrandBlue
+                        ) {
+                            newPendingJobs.forEach { job ->
+                                JobRowItem(
+                                    job = job,
+                                    onVerify = onVerify,
+                                    onAccept = onAccept,
+                                    onCancel = onCancel,
+                                    onDetails = onDetails,
+                                    currentTimeMillis = currentTimeMillis
+                                )
+                            }
+                        }
+                    }
+
+                    if (printingJobs.isNotEmpty()) {
+                        QueueSectionGroup(
+                            title = "CURRENTLY PRINTING",
+                            count = printingJobs.size,
+                            subtitle = "Active print jobs spooling to physical printer hardware",
+                            accentColor = Amber
+                        ) {
+                            printingJobs.forEach { job ->
+                                JobRowItem(
+                                    job = job,
+                                    onVerify = onVerify,
+                                    onAccept = onAccept,
+                                    onCancel = onCancel,
+                                    onDetails = onDetails,
+                                    currentTimeMillis = currentTimeMillis
+                                )
+                            }
+                        }
+                    }
+
+                    if (completedJobs.isNotEmpty()) {
+                        QueueSectionGroup(
+                            title = "COMPLETED JOBS",
+                            count = completedJobs.size,
+                            subtitle = "Finished prints; real-time automatic history deletion countdown active",
+                            accentColor = Emerald
+                        ) {
+                            completedJobs.forEach { job ->
+                                JobRowItem(
+                                    job = job,
+                                    onVerify = onVerify,
+                                    onAccept = onAccept,
+                                    onCancel = onCancel,
+                                    onDetails = onDetails,
+                                    currentTimeMillis = currentTimeMillis
+                                )
+                            }
+                        }
+                    }
+
+                    if (failedJobs.isNotEmpty()) {
+                        QueueSectionGroup(
+                            title = "FAILED & REJECTED",
+                            count = failedJobs.size,
+                            subtitle = "Cancelled or failed print jobs with error telemetry",
+                            accentColor = Rose
+                        ) {
+                            failedJobs.forEach { job ->
+                                JobRowItem(
+                                    job = job,
+                                    onVerify = onVerify,
+                                    onAccept = onAccept,
+                                    onCancel = onCancel,
+                                    onDetails = onDetails,
+                                    currentTimeMillis = currentTimeMillis
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            else -> {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    filteredQueue.forEach { job ->
+                        JobRowItem(
+                            job = job,
+                            onVerify = onVerify,
+                            onAccept = onAccept,
+                            onCancel = onCancel,
+                            onDetails = onDetails,
+                            currentTimeMillis = currentTimeMillis
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QueueSectionGroup(
+    title: String,
+    count: Int,
+    subtitle: String,
+    accentColor: Color,
+    content: @Composable () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.size(8.dp).clip(CircleShape).background(accentColor))
+                Text(title, color = Slate900, fontWeight = FontWeight.Bold, fontSize = 13.sp, letterSpacing = 0.5.sp)
+                Box(
+                    Modifier.clip(RoundedCornerShape(10.dp))
+                        .background(accentColor.copy(alpha = 0.12f))
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Text(count.toString(), color = accentColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            Text(subtitle, color = Slate400, fontSize = 12.sp)
+        }
+        content()
+    }
+}
+
+@Composable
+private fun RowScope.QueueMetricCard(
+    title: String,
+    count: Int,
+    subtitle: String,
+    accentColor: Color,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        Modifier
+            .weight(1f)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (selected) accentColor.copy(alpha = 0.08f) else Slate50)
+            .border(
+                if (selected) 2.dp else 1.dp,
+                if (selected) accentColor else Slate200,
+                RoundedCornerShape(10.dp)
+            )
+            .clickable(onClick = onClick)
+            .padding(14.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(title, color = if (selected) accentColor else Slate500, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+            Text(count.toString(), color = if (selected) accentColor else Slate900, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
+            Text(subtitle, color = Slate400, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -1675,21 +2077,31 @@ private fun JobRowItem(
     onAccept: (PrintJobStatus) -> Unit,
     onCancel: (PrintJobStatus) -> Unit,
     onDetails: (PrintJobStatus) -> Unit,
-    compact: Boolean = false
+    compact: Boolean = false,
+    currentTimeMillis: Long = System.currentTimeMillis()
 ) {
-    val isAuthorized = job.status == "AUTHORIZED"
-    val isCompleted  = job.status == "COMPLETED"
-    val isFailed     = job.status in setOf("FAILED", "CANCELLED", "EXPIRED")
+    val isNewOrPending = job.status in NEW_PENDING_STATUSES
+    val isPrinting    = job.status in PRINTING_STATUSES
+    val isCompleted   = job.status in COMPLETED_STATUSES
+    val isFailed      = job.status in FAILED_STATUSES
+
+    val borderColor = when {
+        isNewOrPending -> BrandBlue
+        isPrinting    -> Amber
+        isCompleted   -> EmeraldBorder
+        isFailed      -> RoseBorder
+        else          -> Slate200
+    }
 
     Card(
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(PureWhite),
         shape  = RoundedCornerShape(12.dp),
         border = androidx.compose.foundation.BorderStroke(
-            if (isAuthorized) 1.5.dp else 1.dp,
-            if (isAuthorized) BrandBlue else Slate200
+            if (isNewOrPending || isPrinting) 1.5.dp else 1.dp,
+            borderColor
         ),
-        elevation = CardDefaults.cardElevation(if (isAuthorized) 2.dp else 0.dp),
+        elevation = CardDefaults.cardElevation(if (isNewOrPending) 2.dp else 0.dp),
     ) {
         Column(Modifier.fillMaxWidth().padding(if (compact) 14.dp else 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             // Main Top Row
@@ -1700,11 +2112,22 @@ private fun JobRowItem(
             ) {
                 // Left: Icon + Doc Info
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    val (iconBg, iconFg) = when {
+                        isNewOrPending -> Pair(BrandBlueLight, BrandBlue)
+                        isPrinting    -> Pair(AmberLight, Amber)
+                        isCompleted   -> Pair(EmeraldLight, Emerald)
+                        else          -> Pair(RoseLight, Rose)
+                    }
                     Box(
-                        Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(if (isAuthorized) BrandBlueLight else Slate100),
+                        Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(iconBg),
                         contentAlignment = Alignment.Center
                     ) {
-                        StationIcons.Document(modifier = Modifier.size(18.dp), color = if (isAuthorized) BrandBlue else Slate600)
+                        when {
+                            isNewOrPending -> StationIcons.Document(modifier = Modifier.size(18.dp), color = iconFg)
+                            isPrinting    -> StationIcons.Printer(modifier = Modifier.size(18.dp), color = iconFg)
+                            isCompleted   -> StationIcons.Check(modifier = Modifier.size(16.dp), color = iconFg)
+                            else          -> StationIcons.Alert(modifier = Modifier.size(16.dp), color = iconFg)
+                        }
                     }
 
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -1717,9 +2140,10 @@ private fun JobRowItem(
                             }
                         }
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("Job #${job.id.takeLast(8).uppercase()}", color = Slate500, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                            val customerText = job.customerName?.let { "$it • " } ?: ""
+                            Text("${customerText}Job #${job.id.takeLast(8).uppercase()}", color = Slate500, fontSize = 11.sp, fontWeight = FontWeight.Medium)
                             Text("·", color = Slate400)
-                            Text(if (job.createdAt.isNotBlank()) "Submitted ${job.createdAt.take(19).replace("T", " ")}" else "Just now", color = Slate400, fontSize = 11.sp)
+                            Text("Submitted ${formatRelativeTime(job.createdAt)}", color = Slate400, fontSize = 11.sp)
                         }
                     }
                 }
@@ -1732,26 +2156,56 @@ private fun JobRowItem(
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Slate100).padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(20.dp)
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                QueueMetaCell("COPIES", "${job.copies.ifBlank { "1" }} copy")
-                QueueMetaCell("PAGES", "${job.pageCount} pgs")
-                QueueMetaCell("COLOR", job.colorMode)
-                QueueMetaCell("SIZE", job.paperSize)
-                QueueMetaCell("DUPLEX", job.duplexMode)
-                if (job.pagesPrinted > 0 || job.status == "PRINTING") {
-                    QueueMetaCell("SPOOL PROGRESS", "${job.pagesPrinted}/${job.pageCount} spooled")
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    QueueMetaCell("COPIES", "${job.copies.ifBlank { "1" }} copy")
+                    QueueMetaCell("PAGES", "${job.pageCount} pgs")
+                    QueueMetaCell("COLOR", job.colorMode)
+                    QueueMetaCell("SIZE", job.paperSize)
+                    QueueMetaCell("DUPLEX", job.duplexMode)
+                    if (!job.printerName.isNullOrBlank()) {
+                        QueueMetaCell("PRINTER", job.printerName)
+                    }
+                }
+                if (isCompleted) {
+                    AutoDeleteCountdownPill(job.completedAt, job.retentionHours, currentTimeMillis)
+                } else if (isPrinting) {
+                    Box(
+                        Modifier.clip(RoundedCornerShape(6.dp)).background(AmberLight).border(1.dp, AmberBorder, RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text("${job.pagesPrinted}/${job.pageCount} spooled", color = Amber, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            // Hardware Spooler Progress Bar if Printing
+            if (isPrinting) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    val progress = if (job.pageCount > 0) (job.pagesPrinted.toFloat() / job.pageCount).coerceIn(0f, 1f) else 0f
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                        color = Amber,
+                        trackColor = Slate200,
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Hardware Spooler: Printing to ${job.printerName ?: "Local Windows Spooler"}", color = Slate500, fontSize = 11.sp)
+                        Text("${(progress * 100).toInt()}% complete", color = Amber, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
 
             // Failure Reason if any
             if (job.failureReason.isNotBlank()) {
-                Text(
-                    "Failure: ${job.failureReason}",
-                    color = Rose,
-                    fontSize = 11.5.sp,
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(RoseLight).padding(8.dp)
-                )
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(RoseLight).padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    StationIcons.Alert(modifier = Modifier.size(14.dp), color = Rose)
+                    Text("Failure reason: ${job.failureReason}", color = Rose, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+                }
             }
 
             // Action Buttons Row
@@ -1761,20 +2215,7 @@ private fun JobRowItem(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (isAuthorized) {
-                        Button(
-                            onClick = { onVerify(job) },
-                            colors = ButtonDefaults.buttonColors(BrandBlueLight, BrandBlueHover),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.height(34.dp),
-                            elevation = ButtonDefaults.buttonElevation(0.dp)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                StationIcons.Eye(modifier = Modifier.size(13.dp), color = BrandBlueHover)
-                                Text("Verify in RAM", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-
+                    if (isNewOrPending) {
                         Button(
                             onClick = { onAccept(job) },
                             colors = ButtonDefaults.buttonColors(BrandBlue, PureWhite),
@@ -1799,6 +2240,32 @@ private fun JobRowItem(
                                 Text("Reject", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
+
+                        Button(
+                            onClick = { onVerify(job) },
+                            colors = ButtonDefaults.buttonColors(BrandBlueLight, BrandBlueHover),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(34.dp),
+                            elevation = ButtonDefaults.buttonElevation(0.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                StationIcons.Eye(modifier = Modifier.size(13.dp), color = BrandBlueHover)
+                                Text("Preview in RAM", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    } else if (isPrinting) {
+                        OutlinedButton(
+                            onClick = { onCancel(job) },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(34.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, RoseBorder),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Rose)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                StationIcons.Close(modifier = Modifier.size(11.dp), color = Rose)
+                                Text("Cancel Printing", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
                     }
                 }
 
@@ -1806,6 +2273,33 @@ private fun JobRowItem(
                     Text("View Specification Sheet ℹ", fontSize = 12.sp, color = Slate500, fontWeight = FontWeight.Medium)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun AutoDeleteCountdownPill(
+    completedAt: String?,
+    retentionHours: Int,
+    currentTimeMillis: Long
+) {
+    val countdownText = formatAutoDeleteCountdown(completedAt, retentionHours, currentTimeMillis)
+    val isImminent = countdownText.contains("Deleting", ignoreCase = true) ||
+        (countdownText.contains("s", ignoreCase = true) && !countdownText.contains("h", ignoreCase = true))
+    Box(
+        Modifier.clip(RoundedCornerShape(6.dp))
+            .background(if (isImminent) AmberLight else EmeraldLight)
+            .border(1.dp, if (isImminent) AmberBorder else EmeraldBorder, RoundedCornerShape(6.dp))
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            StationIcons.Clock(modifier = Modifier.size(12.dp), color = if (isImminent) Amber else Emerald)
+            Text(
+                countdownText,
+                color = if (isImminent) Amber else Emerald,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
         }
     }
 }
@@ -3036,11 +3530,12 @@ private fun JobDetailDialog(
                 HorizontalDivider(color = Slate200)
 
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    detail.customerName?.let { DetailSpecRow("Customer", it) }
+                    DetailSpecRow("Document", detail.documentName)
                     DetailSpecRow("Job ID", "#${detail.id.takeLast(10).uppercase()}")
                     if (detail.batchId != null) {
                         DetailSpecRow("Batch", "Doc ${detail.fileIndex + 1} of ${detail.totalFiles}")
                     }
-                    DetailSpecRow("Document", detail.documentName)
                     DetailSpecRow("Pages", "${detail.pageCount} pgs")
                     DetailSpecRow("Authorized Copies", "${detail.requestedCopies}")
                     DetailSpecRow("Color Mode", detail.colorMode)
@@ -3048,6 +3543,10 @@ private fun JobDetailDialog(
                     DetailSpecRow("Duplex", detail.duplex.ifBlank { "SIMPLEX" })
                     DetailSpecRow("Assigned Printer", detail.selectedPrinter.ifBlank { "System Default" })
                     DetailSpecRow("Submitted", detail.createdAt.take(19).replace("T", " "))
+                    if (!detail.completedAt.isNullOrBlank()) {
+                        DetailSpecRow("Completed At", detail.completedAt.take(19).replace("T", " "))
+                    }
+                    DetailSpecRow("Auto-Delete Retention", "${detail.retentionHours} hours (from completion)")
                 }
 
                 if (detail.failureReason.isNotBlank()) {
@@ -3061,7 +3560,7 @@ private fun JobDetailDialog(
                     OutlinedButton(onClick = onClose, modifier = Modifier.weight(1f).height(42.dp), shape = RoundedCornerShape(8.dp)) {
                         Text("Close", fontSize = 12.sp)
                     }
-                    if (detail.status == "AUTHORIZED") {
+                    if (detail.status in setOf("CREATED", "QUEUED", "AUTHORIZED", "PENDING", "ACCEPTED")) {
                         Button(
                             onClick = { onVerify(detail) },
                             colors  = ButtonDefaults.buttonColors(BrandBlueLight, BrandBlueHover),

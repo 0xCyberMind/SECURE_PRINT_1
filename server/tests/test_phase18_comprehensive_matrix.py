@@ -36,7 +36,8 @@ def test_unit_crypto_aes256_gcm_roundtrip():
 
     # Corrupted ciphertext fails
     with pytest.raises(Exception):
-        aesgcm.decrypt(iv, ciphertext[:-1] + b"\x00", None)
+        corrupted = ciphertext[:-1] + bytes([ciphertext[-1] ^ 0xFF])
+        aesgcm.decrypt(iv, corrupted, None)
 
 
 def test_unit_qr_encoding_and_parsing():

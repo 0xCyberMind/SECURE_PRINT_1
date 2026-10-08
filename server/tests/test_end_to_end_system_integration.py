@@ -45,6 +45,24 @@ async def _setup_test_station(client: TestClient, device: dict, shop_id: str):
     agent.secure_store.store_credentials = lambda **kwargs: None
     await agent.initialize()
 
+    from windows_agent.printer_spooler import SpoolerJobRecord
+    agent.spooler.print_document = lambda printer_id, document_bytes, document_name, copies=1, progress_callback=None: SpoolerJobRecord(
+        spooler_job_id=101,
+        printer_name="HP LaserJet Enterprise M608",
+        document_name=document_name,
+        total_copies=copies,
+        copies_printed=copies,
+        status="COMPLETED",
+        verification_status="TEST_SPOOLER_SUCCESS"
+    )
+    agent.spooler.resolve_printer_id = lambda printer_id=None: "PRN-HP-E2E"
+    agent.spooler.validate_printer_for_job = lambda printer_id: {
+        "id": "PRN-HP-E2E",
+        "name": "HP LaserJet Enterprise M608",
+        "status": "READY",
+        "is_online": True
+    }
+
     key_response = client.put(
         f"/api/v1/devices/{device['device_id']}/print-key",
         json={"public_key": agent._station_public_key_base64()},

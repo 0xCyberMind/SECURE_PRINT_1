@@ -20,6 +20,41 @@ from app.api.v1.endpoints.health import check_dependencies, health_response
 from app.schemas.health import HealthResponse
 
 
+import asyncio
+from app.models.base import AsyncSessionLocal
+from app.services.cleanup_service import DocumentCleanupService
+
+
+async def _periodic_cleanup_scheduler() -> None:
+    """
+    Background worker running inside FastAPI application lifecycle.
+    Executes storage document cleanup sweeps and print history retention sweeps
+    every 60 seconds against the active database and object storage.
+    """
+    logger.info("Background document & history cleanup scheduler initialized")
+    await asyncio.sleep(5)  # Brief warm-up delay after startup
+    while True:
+        try:
+            async with AsyncSessionLocal() as db:
+                cleanup_svc = DocumentCleanupService(db)
+                sweep_res = await cleanup_svc.run_cleanup_sweep()
+                history_res = await cleanup_svc.run_history_cleanup_sweep()
+                await db.commit()
+                if sweep_res.shredded_documents > 0 or history_res.total_deleted_jobs > 0:
+                    logger.info(
+                        "Periodic cleanup completed: shredded_docs=%d, deleted_history_jobs=%d, retained_jobs=%d",
+                        sweep_res.shredded_documents,
+                        history_res.total_deleted_jobs,
+                        history_res.total_retained_jobs,
+                    )
+        except asyncio.CancelledError:
+            logger.info("Background cleanup scheduler shut down gracefully")
+            break
+        except Exception as e:
+            logger.warning("Error in background cleanup scheduler iteration: %s", e)
+        await asyncio.sleep(60)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -27,8 +62,14 @@ async def lifespan(app: FastAPI):
     logger.info(
         f"Starting {settings.PROJECT_NAME} in [{settings.ENVIRONMENT.value}] mode on port {settings.PORT}"
     )
+    cleanup_task = asyncio.create_task(_periodic_cleanup_scheduler())
     yield
     # Shutdown
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
     logger.info(f"Shutting down {settings.PROJECT_NAME}")
 
 

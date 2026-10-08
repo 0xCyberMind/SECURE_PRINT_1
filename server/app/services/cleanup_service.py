@@ -425,22 +425,36 @@ class DocumentCleanupService:
         retained_count = 0
 
         for job in completed_jobs:
-            if not job.completed_at:
+            comp_time = job.completed_at or job.updated_at or job.created_at
+            if not comp_time:
                 retained_count += 1
                 continue
 
-            comp_time = job.completed_at if job.completed_at.tzinfo else job.completed_at.replace(tzinfo=timezone.utc)
+            comp_time = comp_time if comp_time.tzinfo else comp_time.replace(tzinfo=timezone.utc)
             expiry_time = comp_time + timedelta(hours=retention_hours)
 
             if expiry_time <= now_utc:
                 # Job history has expired under shop retention policy
                 deleted_job_ids.append(job.id)
 
+                # Attempt cleanup of the underlying document & physical object storage if eligible
+                if job.document_id:
+                    try:
+                        await self.cleanup_document(
+                            document_id=job.document_id,
+                            job_id=job.id,
+                            force_shred=False,
+                            ip_address="127.0.0.1"
+                        )
+                    except Exception as doc_err:
+                        logger.warning(f"Underlying document cleanup during history retention sweep: {doc_err}")
+
                 # Record audit entry
                 audit = AuditLog(
                     event_type="PRINT_HISTORY_EXPIRED",
                     severity=AuditSeverity.INFO.value,
                     user_id=job.user_id,
+                    shop_id=job.shop_id,
                     job_id=job.id,
                     details=json.dumps({
                         "job_id": job.id,
@@ -466,6 +480,12 @@ class DocumentCleanupService:
                     )
                 except Exception:
                     pass
+
+        logger.info(
+            f"History cleanup for shop {shop_id}: "
+            f"scanned={len(completed_jobs)}, deleted={len(deleted_job_ids)}, "
+            f"retained={retained_count}, retention_hours={retention_hours}"
+        )
 
         return HistoryCleanupResponse(
             shop_id=shop_id,

@@ -587,4 +587,21 @@ object StationIcons {
             drawCircle(c, radius = w * 0.13f, center = Offset(w * 0.5f, h * 0.35f), style = Stroke(width = sw))
         }
     }
+
+    @Composable
+    fun Clock(
+        modifier: Modifier = Modifier.size(14.dp),
+        color: Color = Color.Unspecified
+    ) {
+        Canvas(modifier = modifier) {
+            val c = if (color != Color.Unspecified) color else Color.White
+            val w = size.width
+            val h = size.height
+            val sw = w * 0.10f
+
+            drawCircle(c, radius = w * 0.40f, center = Offset(w * 0.50f, h * 0.50f), style = Stroke(sw))
+            drawLine(c, Offset(w * 0.50f, h * 0.50f), Offset(w * 0.50f, h * 0.25f), strokeWidth = sw, cap = StrokeCap.Round)
+            drawLine(c, Offset(w * 0.50f, h * 0.50f), Offset(w * 0.70f, h * 0.50f), strokeWidth = sw, cap = StrokeCap.Round)
+        }
+    }
 }

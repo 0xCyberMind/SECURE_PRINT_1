@@ -182,6 +182,25 @@ async def increment_copy(
 
     updated_job = await job_repo.increment_copies_atomic(job_id, delta=delta)
     await db.commit()
+
+    redis_service = get_redis_service()
+    event_payload = {
+        "job_id": updated_job.id,
+        "batch_id": updated_job.batch_id,
+        "status": updated_job.status,
+        "requested_copies": updated_job.requested_copies,
+        "completed_copies": updated_job.completed_copies,
+        "completed_at": updated_job.completed_at.isoformat() if updated_job.completed_at else None
+    }
+    if updated_job.status == PrintJobStatus.COMPLETED.value:
+        await redis_service.publish_job_event(updated_job.id, "JOB_COMPLETED", event_payload)
+        await redis_service.publish_user_event(updated_job.user_id, "JOB_COMPLETED", event_payload)
+        await redis_service.publish_shop_event(updated_job.shop_id, "JOB_COMPLETED", event_payload)
+    else:
+        await redis_service.publish_job_event(updated_job.id, "JOB_PROGRESS", event_payload)
+        await redis_service.publish_user_event(updated_job.user_id, "JOB_PROGRESS", event_payload)
+        await redis_service.publish_shop_event(updated_job.shop_id, "JOB_PROGRESS", event_payload)
+
     return JobResponse.model_validate(updated_job)
 
 
@@ -210,5 +229,17 @@ async def fail_job(
     job.status = PrintJobStatus.FAILED.value
     job.failure_reason = reason
     await db.commit()
+
+    redis_service = get_redis_service()
+    fail_payload = {
+        "job_id": job.id,
+        "batch_id": job.batch_id,
+        "status": job.status,
+        "reason": reason
+    }
+    await redis_service.publish_job_event(job.id, "JOB_FAILED", fail_payload)
+    await redis_service.publish_user_event(job.user_id, "JOB_FAILED", fail_payload)
+    await redis_service.publish_shop_event(job.shop_id, "JOB_FAILED", fail_payload)
+
     return JobResponse.model_validate(job)
 

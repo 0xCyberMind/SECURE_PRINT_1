@@ -90,6 +90,10 @@ data class PrintJobStatus(
     val fileIndex: Int = 0,
     val totalFiles: Int = 1,
     val pagesPrinted: Int = 0,
+    val completedAt: String? = null,
+    val customerName: String? = null,
+    val printerName: String? = null,
+    val retentionHours: Int = 4,
 )
 
 data class DocumentPreview(
@@ -116,6 +120,9 @@ data class PrintJobDetail(
     val fileIndex: Int = 0,
     val totalFiles: Int = 1,
     val pagesPrinted: Int = 0,
+    val completedAt: String? = null,
+    val customerName: String? = null,
+    val retentionHours: Int = 4,
 )
 
 data class AuditEvent(
@@ -208,6 +215,7 @@ class StationBridge {
     @Volatile private var lastPrinters = emptyList<PrinterStatus>()
     @Volatile private var lastJobCount = 0
     @Volatile private var cachedShopDetails: ShopDetails? = null
+    @Volatile var onRealtimeEvent: ((eventType: String, data: JsonObject) -> Unit)? = null
 
     fun start() {
         if (!System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
@@ -480,6 +488,10 @@ class StationBridge {
                     get("/api/v1/documents/${encodePath(dId)}").stringOrEmpty("filename").ifBlank { "Document" }
                 }.getOrDefault("Document")
             }
+            val completedAt = job.stringOrEmpty("completed_at").ifBlank { null }
+            val customerName = job.stringOrEmpty("customer_name").ifBlank { null }
+            val printerName = job.stringOrEmpty("printer_name").ifBlank { null }
+            val retentionHours = job.get("retention_hours")?.asInt ?: 4
             PrintJobStatus(
                 id = id,
                 status = job.stringOrEmpty("status"),
@@ -496,6 +508,10 @@ class StationBridge {
                 fileIndex = job.get("file_index")?.asInt ?: 0,
                 totalFiles = job.get("total_files")?.asInt ?: 1,
                 pagesPrinted = job.get("pages_printed")?.asInt ?: 0,
+                completedAt = completedAt,
+                customerName = customerName,
+                printerName = printerName,
+                retentionHours = retentionHours,
             )
         }.also { rows ->
             lastJobCount = rows.count { it.status == "COMPLETED" }
@@ -516,6 +532,10 @@ class StationBridge {
                     get("/api/v1/documents/${encodePath(dId)}").stringOrEmpty("filename").ifBlank { "Document" }
                 }.getOrDefault("Document")
             }
+            val completedAt = job.stringOrEmpty("completed_at").ifBlank { null }
+            val customerName = job.stringOrEmpty("customer_name").ifBlank { null }
+            val printerName = job.stringOrEmpty("printer_name").ifBlank { null }
+            val retentionHours = job.get("retention_hours")?.asInt ?: 4
             PrintJobStatus(
                 id = id,
                 status = job.stringOrEmpty("status"),
@@ -532,6 +552,10 @@ class StationBridge {
                 fileIndex = job.get("file_index")?.asInt ?: 0,
                 totalFiles = job.get("total_files")?.asInt ?: 1,
                 pagesPrinted = job.get("pages_printed")?.asInt ?: 0,
+                completedAt = completedAt,
+                customerName = customerName,
+                printerName = printerName,
+                retentionHours = retentionHours,
             )
         }
     }
@@ -602,6 +626,21 @@ class StationBridge {
             post("/api/v1/cleanup/execute/${encodePath(jobId)}", JsonObject())
         }
         recordAudit("JOB_CANCELLED", "Print job $jobId was cancelled by operator ($reason).")
+    }
+
+    fun authorizeJob(jobId: String, preferredPrinterId: String? = null) {
+        requireCredentials()
+        val payload = JsonObject().apply {
+            if (!preferredPrinterId.isNullOrBlank()) {
+                addProperty("printer_id", preferredPrinterId)
+            }
+        }
+        post("/api/v1/jobs/${encodePath(jobId)}/authorize", payload)
+        recordAudit("JOB_AUTHORIZED", "Print job $jobId was authorized by operator.")
+    }
+
+    fun rejectJob(jobId: String, reason: String = "Rejected by shop operator") {
+        cancelJob(jobId, reason)
     }
 
     fun previewJob(jobId: String): DocumentPreview {
@@ -728,6 +767,9 @@ class StationBridge {
             fileIndex = job.get("file_index")?.asInt ?: 0,
             totalFiles = job.get("total_files")?.asInt ?: 1,
             pagesPrinted = job.get("pages_printed")?.asInt ?: 0,
+            completedAt = job.stringOrEmpty("completed_at").ifBlank { null },
+            customerName = job.stringOrEmpty("customer_name").ifBlank { null },
+            retentionHours = job.get("retention_hours")?.asInt ?: 4,
         )
     }
 
@@ -842,7 +884,12 @@ class StationBridge {
         try {
             val saved = requireCredentials()
             val job = get("/api/v1/jobs/${encodePath(jobId)}")
-            if (job.stringOrEmpty("status") != "AUTHORIZED") return
+            var currentStatus = job.stringOrEmpty("status")
+            if (currentStatus in setOf("CREATED", "QUEUED")) {
+                post("/api/v1/jobs/${encodePath(jobId)}/authorize", JsonObject())
+                currentStatus = "AUTHORIZED"
+            }
+            if (currentStatus != "AUTHORIZED") return
             if (job.stringOrEmpty("shop_id") != saved.shopId) {
                 throw IOException("This print job belongs to a different shop.")
             }
@@ -1124,13 +1171,18 @@ class StationBridge {
             override fun onMessage(webSocket: WebSocket, text: String) {
                 runCatching {
                     val message = JsonParser.parseString(text).asJsonObject
-                    if (message.stringOrEmpty("type") == "event" &&
-                        message.stringOrEmpty("event") == "JOB_AUTHORIZED"
-                    ) {
-                        val jobId = message.getAsJsonObject("data")?.stringOrEmpty("job_id").orEmpty()
-                        if (jobId.isNotBlank() && credentials?.autoPrintEnabled == true) {
-                            printExecutor.execute { processJob(jobId) }
+                    if (message.stringOrEmpty("type") == "event") {
+                        val eventType = message.stringOrEmpty("event")
+                        val data = message.getAsJsonObject("data") ?: JsonObject()
+
+                        if (eventType == "JOB_AUTHORIZED") {
+                            val jobId = data.stringOrEmpty("job_id")
+                            if (jobId.isNotBlank() && credentials?.autoPrintEnabled == true) {
+                                printExecutor.execute { processJob(jobId) }
+                            }
                         }
+
+                        onRealtimeEvent?.invoke(eventType, data)
                     }
                 }.onFailure {
                     recordAudit("CLOUD_EVENT_INVALID", it.message ?: "Could not parse a cloud event.", "WARNING")
