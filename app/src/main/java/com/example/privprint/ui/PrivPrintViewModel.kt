@@ -93,7 +93,9 @@ data class UserUiState(
     val printSettings: PrintSettings = PrintSettings(),
     val scannerError: String? = null,
     val manualCodeInput: String = "",
-    val toastMessage: String? = null
+    val toastMessage: String? = null,
+    val isSubmittingJob: Boolean = false,
+    val submissionError: String? = null
 )
 
 data class ShopUiState(
@@ -555,7 +557,12 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun navigateToUserScreen(screen: UserScreen) {
-        _userUiState.value = _userUiState.value.copy(currentScreen = screen, scannerError = null)
+        _userUiState.value = _userUiState.value.copy(
+            currentScreen = screen,
+            scannerError = null,
+            submissionError = null,
+            isSubmittingJob = false
+        )
     }
 
     fun navigateToShopScreen(screen: ShopScreen) {
@@ -690,9 +697,12 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
         )
     }
 
-    // --- Job Submission & Execution ---
+    // Guard against duplicate concurrent job submissions
+    private var isSubmittingJob = false
 
     fun confirmAndSubmitJob() {
+        if (isSubmittingJob) return
+
         val session = activeSession.value
         val allDocs = _userUiState.value.selectedDocuments
         val doc = if (allDocs.size > 1) {
@@ -703,9 +713,18 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
         val settings = _userUiState.value.printSettings
 
         if (session == null || doc == null) {
-            _userUiState.value = _userUiState.value.copy(toastMessage = "Missing session or document.")
+            _userUiState.value = _userUiState.value.copy(
+                toastMessage = "Missing session or document.",
+                submissionError = "Missing session or document. Please select a document again."
+            )
             return
         }
+
+        isSubmittingJob = true
+        _userUiState.value = _userUiState.value.copy(
+            isSubmittingJob = true,
+            submissionError = null
+        )
 
         viewModelScope.launch {
             try {
@@ -717,16 +736,20 @@ class PrivPrintViewModel(application: Application) : AndroidViewModel(applicatio
                     settings = settings
                 )
                 _userUiState.value = _userUiState.value.copy(
+                    isSubmittingJob = false,
+                    submissionError = null,
                     currentScreen = UserScreen.ACTIVE_TRACKING,
                     toastMessage = "Document encrypted and securely sent to the print station."
                 )
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 _userUiState.value = _userUiState.value.copy(
-                    selectedDocument = null,
-                    currentScreen = UserScreen.DOCUMENT_PICKER,
-                    toastMessage = "File was not sent: ${e.message ?: "secure upload failed"}. Select it again to retry."
+                    isSubmittingJob = false,
+                    submissionError = e.message ?: "Secure upload failed. Please try again.",
+                    toastMessage = "File was not sent: ${e.message ?: "secure upload failed"}. Please retry."
                 )
+            } finally {
+                isSubmittingJob = false
             }
         }
     }

@@ -297,7 +297,7 @@ class StationBridge {
                     "shop_id" to shopId,
                     "name" to "PrivPrint Windows Station",
                     "os_info" to "${System.getProperty("os.name")} ${System.getProperty("os.version")}",
-                    "app_version" to "1.0.4",
+                    "app_version" to "1.0.0",
                 ),
                 bearerToken = operator,
             )

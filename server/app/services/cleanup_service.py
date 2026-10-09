@@ -81,7 +81,19 @@ class DocumentCleanupService:
             if sess_exp < now_utc:
                 return False, "Parent session has expired", 0
 
-        # 5. Check Authorized Copies Limit
+        # 5. Check if all associated print jobs for this document have terminated in failed/cancelled state
+        all_jobs_query = select(PrintJob).where(PrintJob.document_id == doc.id)
+        all_res = await self.db.execute(all_jobs_query)
+        all_jobs = all_res.scalars().all()
+
+        if all_jobs and all(j.status in [PrintJobStatus.FAILED.value, PrintJobStatus.CANCELLED.value, PrintJobStatus.EXPIRED.value] for j in all_jobs):
+            newest_failure = max((j.completed_at or j.updated_at or j.created_at) for j in all_jobs)
+            if newest_failure.tzinfo is None:
+                newest_failure = newest_failure.replace(tzinfo=timezone.utc)
+            if newest_failure + timedelta(seconds=120) <= now_utc:
+                return False, "All associated print jobs failed or were cancelled (> 2 minutes ago)", 0
+
+        # 6. Check Authorized Copies Limit
         if doc.copies_consumed >= doc.copies_authorized:
             return False, f"All authorized copies ({doc.copies_authorized}) consumed", 0
 
@@ -304,10 +316,47 @@ class DocumentCleanupService:
                 cleaned_at=datetime.now(timezone.utc)
             )
 
+        # Check if any active/non-terminal jobs still reference this document
+        non_terminal_statuses = [
+            PrintJobStatus.CREATED.value,
+            PrintJobStatus.QUEUED.value,
+            PrintJobStatus.AUTHORIZED.value,
+            PrintJobStatus.PRINTING.value
+        ]
+        active_check = await self.db.execute(
+            select(PrintJob.id).where(
+                and_(
+                    PrintJob.document_id == job.document_id,
+                    PrintJob.id != job.id,
+                    PrintJob.status.in_(non_terminal_statuses)
+                )
+            )
+        )
+        active_job_ids = active_check.scalars().all()
+        if active_job_ids:
+            return CleanupResponse(
+                job_id=job.id,
+                document_id=job.document_id,
+                cleanup_state=CleanupState.PENDING.value,
+                storage_verified_deleted=False,
+                retention_required=True,
+                reason=f"Document has {len(active_job_ids)} active/in-progress print job(s)",
+                storage_path=None,
+                storage_backend="S3_COMPATIBLE_OBJECT_STORE",
+                guarantee_level="OBJECT_DELETION_VERIFIED",
+                cleaned_at=datetime.now(timezone.utc)
+            )
+
+        force_shred = (job.status in [
+            PrintJobStatus.FAILED.value,
+            PrintJobStatus.CANCELLED.value,
+            PrintJobStatus.EXPIRED.value
+        ])
+
         return await self.cleanup_document(
             document_id=job.document_id,
             job_id=job.id,
-            force_shred=False,
+            force_shred=force_shred,
             ip_address=ip_address
         )
 
@@ -411,41 +460,84 @@ class DocumentCleanupService:
 
         retention_hours = shop.history_retention_hours if shop and shop.history_retention_hours else 4
 
-        # 2. Query completed jobs for this shop
+        # 2. Query terminal jobs for this shop (Never query or include active/pending jobs)
+        terminal_statuses = [
+            PrintJobStatus.COMPLETED.value,
+            PrintJobStatus.FAILED.value,
+            PrintJobStatus.CANCELLED.value,
+            PrintJobStatus.EXPIRED.value
+        ]
+        non_terminal_statuses = [
+            PrintJobStatus.CREATED.value,
+            PrintJobStatus.QUEUED.value,
+            PrintJobStatus.AUTHORIZED.value,
+            PrintJobStatus.PRINTING.value
+        ]
+
         job_query = select(PrintJob).where(
             and_(
                 PrintJob.shop_id == shop_id,
-                PrintJob.status == PrintJobStatus.COMPLETED.value
+                PrintJob.status.in_(terminal_statuses)
             )
         )
         res = await self.db.execute(job_query)
-        completed_jobs = res.scalars().all()
+        terminal_jobs = res.scalars().all()
 
         deleted_job_ids: List[str] = []
         retained_count = 0
 
-        for job in completed_jobs:
+        for job in terminal_jobs:
+            if job.status in non_terminal_statuses:
+                retained_count += 1
+                continue
+
             comp_time = job.completed_at or job.updated_at or job.created_at
             if not comp_time:
                 retained_count += 1
                 continue
 
             comp_time = comp_time if comp_time.tzinfo else comp_time.replace(tzinfo=timezone.utc)
-            expiry_time = comp_time + timedelta(hours=retention_hours)
+
+            # Check retention window based on job status
+            if job.status in [PrintJobStatus.FAILED.value, PrintJobStatus.CANCELLED.value, PrintJobStatus.EXPIRED.value]:
+                # Failed or cancelled jobs: 2-minute threshold (120 seconds), regardless of retention timer
+                expiry_time = comp_time + timedelta(seconds=120)
+                is_failed_or_cancelled = True
+            else:
+                # Completed jobs: Shop's configured retention hours
+                expiry_time = comp_time + timedelta(hours=retention_hours)
+                is_failed_or_cancelled = False
 
             if expiry_time <= now_utc:
-                # Job history has expired under shop retention policy
+                # Job history has expired under policy
                 deleted_job_ids.append(job.id)
 
-                # Attempt cleanup of the underlying document & physical object storage if eligible
+                # Attempt cleanup of the underlying document & physical object storage
                 if job.document_id:
                     try:
-                        await self.cleanup_document(
-                            document_id=job.document_id,
-                            job_id=job.id,
-                            force_shred=False,
-                            ip_address="127.0.0.1"
+                        active_check = await self.db.execute(
+                            select(PrintJob.id).where(
+                                and_(
+                                    PrintJob.document_id == job.document_id,
+                                    PrintJob.id != job.id,
+                                    PrintJob.status.in_(non_terminal_statuses)
+                                )
+                            )
                         )
+                        active_job_ids = active_check.scalars().all()
+
+                        if not active_job_ids:
+                            await self.cleanup_document(
+                                document_id=job.document_id,
+                                job_id=job.id,
+                                force_shred=True,
+                                ip_address="127.0.0.1"
+                            )
+                        else:
+                            logger.info(
+                                f"Preserving document {job.document_id} storage: "
+                                f"{len(active_job_ids)} active job(s) still referencing it"
+                            )
                     except Exception as doc_err:
                         logger.warning(f"Underlying document cleanup during history retention sweep: {doc_err}")
 
@@ -459,8 +551,9 @@ class DocumentCleanupService:
                     details=json.dumps({
                         "job_id": job.id,
                         "shop_id": job.shop_id,
-                        "completed_at": comp_time.isoformat(),
-                        "retention_hours": retention_hours,
+                        "status": job.status,
+                        "term_time": comp_time.isoformat(),
+                        "retention_rule": "2_MINUTES_FAILED_CANCELLED" if is_failed_or_cancelled else f"{retention_hours}_HOURS_COMPLETED",
                         "action": "AUTO_DELETED_FROM_HISTORY"
                     })
                 )
@@ -483,7 +576,7 @@ class DocumentCleanupService:
 
         logger.info(
             f"History cleanup for shop {shop_id}: "
-            f"scanned={len(completed_jobs)}, deleted={len(deleted_job_ids)}, "
+            f"scanned={len(terminal_jobs)}, deleted={len(deleted_job_ids)}, "
             f"retained={retained_count}, retention_hours={retention_hours}"
         )
 

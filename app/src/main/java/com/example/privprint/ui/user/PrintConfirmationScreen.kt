@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Print
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -38,6 +39,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,9 +61,11 @@ import com.example.privprint.data.model.SelectedDocument
 import com.example.privprint.data.model.Shop
 import com.example.privprint.ui.components.CornerRadiusButton
 import com.example.privprint.ui.components.PrivPrintCard
+import com.example.privprint.ui.components.PrivPrintErrorState
 import com.example.privprint.ui.components.PrivPrintOutlinedButton
 import com.example.privprint.ui.components.PrivPrintPrimaryButton
 import com.example.privprint.ui.components.PrivPrintPrivacyIndicator
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -67,10 +76,45 @@ fun PrintConfirmationScreen(
     settings: PrintSettings,
     onConfirm: () -> Unit,
     onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isSubmitting: Boolean = false,
+    errorMessage: String? = null
 ) {
     val pricePerPage = if (settings.colorMode == ColorMode.COLOR) 0.25 else 0.10
     val totalCost = document.pageCount * settings.copies * pricePerPage
+
+    var localSubmitting by remember { mutableStateOf(false) }
+    var remainingSeconds by remember { mutableIntStateOf(5) }
+
+    // Synchronize local submitting state with external isSubmitting & errorMessage
+    LaunchedEffect(isSubmitting, errorMessage) {
+        if (!isSubmitting) {
+            localSubmitting = false
+        }
+    }
+
+    val submitting = isSubmitting || localSubmitting
+
+    // 5-second countdown timer for visual feedback during sending
+    LaunchedEffect(submitting) {
+        if (submitting) {
+            remainingSeconds = 5
+            while (remainingSeconds > 1) {
+                delay(1000L)
+                remainingSeconds -= 1
+            }
+            delay(1000L)
+            remainingSeconds = 0
+        } else {
+            remainingSeconds = 5
+        }
+    }
+
+    val buttonText = when {
+        !submitting -> if (errorMessage != null) "Retry Secure Print" else "Send Secure Print"
+        remainingSeconds > 0 -> "Sending securely… Please wait (${remainingSeconds}s)"
+        else -> "Sending securely… Please wait…"
+    }
 
     Scaffold(
         topBar = {
@@ -82,7 +126,10 @@ fun PrintConfirmationScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = onBack,
+                        enabled = !submitting
+                    ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back"
@@ -174,13 +221,34 @@ fun PrintConfirmationScreen(
                 }
             }
 
+            if (errorMessage != null) {
+                PrivPrintErrorState(
+                    title = "Print Request Failed",
+                    message = errorMessage,
+                    onRetry = {
+                        if (!submitting) {
+                            localSubmitting = true
+                            onConfirm()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
             Spacer(modifier = Modifier.height(8.dp))
 
             // Action CTAs
             PrivPrintPrimaryButton(
-                text = "Send Secure Print",
-                icon = Icons.Default.Print,
-                onClick = onConfirm,
+                text = buttonText,
+                icon = if (!submitting) (if (errorMessage != null) Icons.Default.Refresh else Icons.Default.Print) else null,
+                onClick = {
+                    if (!submitting) {
+                        localSubmitting = true
+                        onConfirm()
+                    }
+                },
+                enabled = !submitting,
+                isLoading = submitting,
                 modifier = Modifier.fillMaxWidth(),
                 testTag = "confirm_print_job_button"
             )
@@ -188,6 +256,7 @@ fun PrintConfirmationScreen(
             PrivPrintOutlinedButton(
                 text = "Back to Settings",
                 onClick = onBack,
+                enabled = !submitting,
                 modifier = Modifier.fillMaxWidth()
             )
 

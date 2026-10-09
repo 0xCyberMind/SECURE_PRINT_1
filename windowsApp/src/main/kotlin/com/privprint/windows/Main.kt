@@ -342,7 +342,7 @@ private fun LoginScreen(bridge: StationBridge) {
                 // Bottom Version & Trust Badges
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(Modifier.size(6.dp).clip(CircleShape).background(Emerald))
-                    Text("PrivPrint Enterprise v1.0.5  ·  SOC-2 Compliant Architecture", color = Slate500, fontSize = 11.sp)
+                    Text("PrivPrint Enterprise v1.0.0  ·  SOC-2 Compliant Architecture", color = Slate500, fontSize = 11.sp)
                 }
             }
         }
@@ -3232,7 +3232,7 @@ private fun SettingsPage(
                                 }
                                 Column {
                                     Text("PrivPrint Enterprise Shop Station", color = Slate900, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                    Text("Version 1.0.5  ·  Build 2026.10", color = Slate500, fontSize = 11.sp)
+                                    Text("Version 1.0.0  ·  Build 2026.10", color = Slate500, fontSize = 11.sp)
                                 }
                             }
                             Text("PrivPrint replaces insecure WhatsApp, USB, and email file transfers in Xerox shops with authenticated, end-to-end encrypted printing.", color = Slate600, fontSize = 12.5.sp, lineHeight = 18.sp)

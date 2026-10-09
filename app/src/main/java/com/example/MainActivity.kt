@@ -300,6 +300,8 @@ fun PrivPrintApp(viewModel: PrivPrintViewModel) {
                                             session = activeSession,
                                             document = doc,
                                             settings = userUiState.printSettings,
+                                            isSubmitting = userUiState.isSubmittingJob,
+                                            errorMessage = userUiState.submissionError,
                                             onConfirm = { viewModel.confirmAndSubmitJob() },
                                             onBack = { viewModel.navigateToUserScreen(UserScreen.PRINT_SETTINGS) }
                                         )

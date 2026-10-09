@@ -46,3 +46,4 @@ debug.keystore
 *.log
 *.msi
 *.apk
+*.exe
