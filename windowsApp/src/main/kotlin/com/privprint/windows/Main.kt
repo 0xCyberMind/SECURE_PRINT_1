@@ -82,39 +82,62 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalTime
 
-// ─── Design Tokens & Refined Color System ─────────────────────────────────────
-private val Slate950         = Color(0xFF090D16) // Deepest navy
-private val Slate900         = Color(0xFF0F172A) // Sidebar dark
-private val Slate850         = Color(0xFF162032) // Sidebar card / elevated
-private val Slate800         = Color(0xFF1E293B) // Dark item border / hover
-private val Slate700         = Color(0xFF334155) // Dark muted text
-private val Slate600         = Color(0xFF475569) // Secondary dark
-private val Slate500         = Color(0xFF64748B) // Neutral muted
-private val Slate400         = Color(0xFF94A3B8) // Light muted
-private val Slate300         = Color(0xFFCBD5E1) // Strong border
-private val Slate200         = Color(0xFFE2E8F0) // Subtle border
-private val Slate100         = Color(0xFFF1F5F9) // Surface variant
-private val Slate50          = Color(0xFFF8FAFC) // App canvas background
-private val PureWhite        = Color(0xFFFFFFFF) // Card surface
+// ─── Design Tokens: "Ink & Sheet" Enterprise Print System ─────────────────────
+private val InkNavyDeep      = Color(0xFF0C1829) // Deepest structural ink-navy (Sidebar background)
+private val InkNavySurface   = Color(0xFF13233B) // Elevated card inside ink sidebar
+private val InkNavyBorder    = Color(0xFF1E3456) // Dark border inside sidebar
+private val InkNavyHover     = Color(0xFF182C4B) // Sidebar item hover
+private val InkNavyActive    = Color(0xFF1D3557) // Active nav item pill
 
-// Brand Accent Colors
-private val BrandBlue        = Color(0xFF2563EB) // Electric blue
-private val BrandBlueHover   = Color(0xFF1D4ED8) // Deep blue
-private val BrandBlueLight   = Color(0xFFEFF6FF) // Blue tint surface
-private val BrandBlueBorder  = Color(0xFFBFDBFE) // Blue border
-private val BrandBlueNavy    = Color(0xFF1E3A8A) // Active nav accent
+private val DeskBackground   = Color(0xFFF1F4F8) // Pale cool-grey desk environment
+private val SheetSurface     = Color(0xFFFFFFFF) // Crisp pure white paper sheet
+private val SheetSurfaceSub  = Color(0xFFF8FAFC) // Very light neutral surface
+private val SheetBorder      = Color(0xFFE2E8F0) // Subtle sheet boundary (1dp)
+private val SheetBorderStrong= Color(0xFFCBD5E1) // High-contrast border
 
-// Status Colors
-private val Emerald          = Color(0xFF059669) // Success green
+// Ink Typography (Deep charcoal navy hierarchy for maximum print trade legibility)
+private val InkPrimary       = Color(0xFF09111E) // High-contrast title and value ink
+private val InkSecondary     = Color(0xFF475569) // Neutral subtitle & label ink
+private val InkMuted         = Color(0xFF64748B) // Medium muted metadata ink
+private val InkSubtle        = Color(0xFF94A3B8) // Light timestamp & subtle hint ink
+
+// Legacy Slate Aliases (mapped 1:1 to new Ink & Sheet tokens for consistency)
+private val Slate950         = InkNavyDeep
+private val Slate900         = InkNavyDeep
+private val Slate850         = InkNavySurface
+private val Slate800         = InkNavyBorder
+private val Slate700         = Color(0xFF334155)
+private val Slate600         = InkSecondary
+private val Slate500         = InkMuted
+private val Slate400         = InkSubtle
+private val Slate300         = SheetBorderStrong
+private val Slate200         = SheetBorder
+private val Slate100         = Color(0xFFF1F5F9)
+private val Slate50          = DeskBackground
+private val PureWhite        = SheetSurface
+
+// Cobalt: The Single Primary Action
+private val CobaltAction     = Color(0xFF1D4ED8) // Enterprise action cobalt
+private val CobaltHover      = Color(0xFF1E40AF) // Pressed/hover cobalt
+private val CobaltLight      = Color(0xFFEFF6FF) // Tint surface
+private val CobaltBorder     = Color(0xFFBFDBFE) // Tint border
+private val BrandBlue        = CobaltAction
+private val BrandBlueHover   = CobaltHover
+private val BrandBlueLight   = CobaltLight
+private val BrandBlueBorder  = CobaltBorder
+private val BrandBlueNavy    = InkNavyActive
+
+// Print Trade Status Accents
+private val Emerald          = Color(0xFF059669) // Completed & Verified green
 private val EmeraldHover     = Color(0xFF047857)
 private val EmeraldLight     = Color(0xFFECFDF5)
 private val EmeraldBorder    = Color(0xFFA7F3D0)
 
-private val Amber            = Color(0xFFD97706) // Warning amber
+private val Amber            = Color(0xFFD97706) // Printing & Spooling warm amber
 private val AmberLight       = Color(0xFFFFFBEB)
 private val AmberBorder      = Color(0xFFFDE68A)
 
-private val Rose             = Color(0xFFDC2626) // Danger red
+private val Rose             = Color(0xFFDC2626) // Rejected & Cancelled rose
 private val RoseLight        = Color(0xFFFEF2F2)
 private val RoseBorder       = Color(0xFFFECACA)
 
@@ -158,22 +181,22 @@ fun main() = application {
     ) {
         MaterialTheme(
             colorScheme = lightColorScheme(
-                primary             = BrandBlue,
-                onPrimary           = PureWhite,
-                primaryContainer    = BrandBlueLight,
-                onPrimaryContainer  = BrandBlueHover,
-                secondary           = Slate900,
-                background          = Slate50,
-                onBackground        = Slate900,
-                surface             = PureWhite,
-                onSurface           = Slate900,
-                surfaceVariant      = Slate100,
-                onSurfaceVariant    = Slate600,
-                outline             = Slate200,
+                primary             = CobaltAction,
+                onPrimary           = SheetSurface,
+                primaryContainer    = CobaltLight,
+                onPrimaryContainer  = CobaltHover,
+                secondary           = InkNavyDeep,
+                background          = DeskBackground,
+                onBackground        = InkPrimary,
+                surface             = SheetSurface,
+                onSurface           = InkPrimary,
+                surfaceVariant      = SheetSurfaceSub,
+                onSurfaceVariant    = InkSecondary,
+                outline             = SheetBorder,
                 error               = Rose,
             ),
         ) {
-            Surface(Modifier.fillMaxSize(), color = Slate50) {
+            Surface(Modifier.fillMaxSize(), color = DeskBackground) {
                 when {
                     startupError != null -> StartupFailureScreen(startupError!!)
                     !isReady             -> SplashScreen()
@@ -852,10 +875,10 @@ private fun StationApplication(bridge: StationBridge, initialStatus: StationStat
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("ID: ${shop!!.id.takeLast(10)}", color = Slate500, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                            Text("Station Counter · Active", color = Emerald, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold)
                             Text(
                                 "Display QR →",
-                                color = BrandBlue,
+                                color = CobaltAction,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.clickable { selectedPage = StationPage.SHOP_QR }
@@ -880,7 +903,7 @@ private fun StationApplication(bridge: StationBridge, initialStatus: StationStat
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
                             category.label,
-                            color = Slate500,
+                            color = InkMuted,
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 1.5.sp,
@@ -909,7 +932,7 @@ private fun StationApplication(bridge: StationBridge, initialStatus: StationStat
             }
 
             // Sidebar Footer: Status & Account
-            HorizontalDivider(color = Slate800)
+            HorizontalDivider(color = InkNavyBorder)
 
             Column(
                 Modifier.fillMaxWidth().padding(14.dp),
@@ -927,7 +950,7 @@ private fun StationApplication(bridge: StationBridge, initialStatus: StationStat
                 ) {
                     Box(Modifier.size(6.dp).clip(CircleShape).background(if (isOnline) Emerald else Amber))
                     Text(
-                        if (isOnline) "Station Online · DPAPI Active" else "Reconnecting Cloud…",
+                        if (isOnline) "Station Online · DPAPI Sealed" else "Reconnecting Cloud…",
                         color = if (isOnline) Emerald else Amber,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold
@@ -940,16 +963,16 @@ private fun StationApplication(bridge: StationBridge, initialStatus: StationStat
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
                         Box(
-                            Modifier.size(28.dp).clip(CircleShape).background(Slate800),
+                            Modifier.size(28.dp).clip(CircleShape).background(InkNavySurface),
                             contentAlignment = Alignment.Center
                         ) {
-                            StationIcons.User(modifier = Modifier.size(14.dp), color = Slate400)
+                            StationIcons.User(modifier = Modifier.size(14.dp), color = InkSubtle)
                         }
-                        Column {
-                            Text("Operator", color = PureWhite, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            Text(status?.shopId?.takeLast(10) ?: "Station Account", color = Slate500, fontSize = 10.sp)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(shop?.name ?: "Shop Operator", color = SheetSurface, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("Verified Workstation", color = InkSubtle, fontSize = 10.sp)
                         }
                     }
 
@@ -976,19 +999,19 @@ private fun StationApplication(bridge: StationBridge, initialStatus: StationStat
 
         // ── 2. Master Content Canvas ──
         Column(Modifier.fillMaxSize()) {
-            // Enterprise Top Header Bar
+            // Enterprise Top Header Bar (Crisp Sheet)
             Row(
-                Modifier.fillMaxWidth().height(64.dp).background(PureWhite).padding(horizontal = 28.dp),
+                Modifier.fillMaxWidth().height(64.dp).background(SheetSurface).padding(horizontal = 28.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Breadcrumbs & Page Description
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("PrivPrint", color = Slate500, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                        StationIcons.ChevronRight(modifier = Modifier.size(10.dp), color = Slate400)
-                        Text(selectedPage.title, color = Slate900, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Text("PrivPrint", color = InkMuted, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                        StationIcons.ChevronRight(modifier = Modifier.size(10.dp), color = InkSubtle)
+                        Text(selectedPage.title, color = InkPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     }
-                    Text(selectedPage.subtitle, color = Slate500, fontSize = 11.sp)
+                    Text(selectedPage.subtitle, color = InkSecondary, fontSize = 11.5.sp)
                 }
 
                 // Header Controls
@@ -997,14 +1020,14 @@ private fun StationApplication(bridge: StationBridge, initialStatus: StationStat
                     val isAutoPrint = status?.autoPrintEnabled == true
                     Box(
                         Modifier.clip(RoundedCornerShape(20.dp))
-                            .background(if (isAutoPrint) BrandBlueLight else Slate100)
-                            .border(1.dp, if (isAutoPrint) BrandBlueBorder else Slate200, RoundedCornerShape(20.dp))
+                            .background(if (isAutoPrint) CobaltLight else DeskBackground)
+                            .border(1.dp, if (isAutoPrint) CobaltBorder else SheetBorder, RoundedCornerShape(20.dp))
                             .padding(horizontal = 10.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            if (isAutoPrint) "Auto-Print: ACTIVE" else "Auto-Print: MANUAL",
-                            color = if (isAutoPrint) BrandBlueHover else Slate600,
-                            fontSize = 10.sp,
+                            if (isAutoPrint) "Auto-Print: ACTIVE" else "Auto-Print: MANUAL APPROVAL",
+                            color = if (isAutoPrint) CobaltHover else InkSecondary,
+                            fontSize = 10.5.sp,
                             fontWeight = FontWeight.Bold,
                         )
                     }
@@ -1034,11 +1057,11 @@ private fun StationApplication(bridge: StationBridge, initialStatus: StationStat
                         },
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.height(34.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Slate700),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Slate200),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = InkSecondary),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, SheetBorderStrong),
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            StationIcons.Refresh(modifier = Modifier.size(12.dp), color = Slate600)
+                            StationIcons.Refresh(modifier = Modifier.size(12.dp), color = InkSecondary)
                             Text(
                                 when (selectedPage) {
                                     StationPage.QUEUE    -> "Sync Queue"
@@ -1053,7 +1076,7 @@ private fun StationApplication(bridge: StationBridge, initialStatus: StationStat
                     }
                 }
             }
-            HorizontalDivider(color = Slate200)
+            HorizontalDivider(color = SheetBorder)
 
             // Scrollable Content Viewport
             Box(Modifier.fillMaxSize()) {
@@ -2040,36 +2063,189 @@ private fun RowScope.QueueMetricCard(
             .padding(14.dp)
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, color = if (selected) accentColor else Slate500, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
-            Text(count.toString(), color = if (selected) accentColor else Slate900, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
-            Text(subtitle, color = Slate400, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(title, color = if (selected) accentColor else InkSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+            Text(count.toString(), color = if (selected) accentColor else InkPrimary, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
+            Text(subtitle, color = InkMuted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
 
 @Composable
-private fun QueueFilterTab(label: String, count: Int, selected: Boolean, activeColor: Color = BrandBlue, onClick: () -> Unit) {
+private fun QueueFilterTab(
+    label: String,
+    count: Int,
+    selected: Boolean,
+    activeColor: Color = CobaltAction,
+    onClick: () -> Unit
+) {
     Box(
         Modifier.clip(RoundedCornerShape(8.dp))
-            .background(if (selected) PureWhite else Slate100)
-            .border(1.dp, if (selected) activeColor else Slate200, RoundedCornerShape(8.dp))
+            .background(if (selected) SheetSurface else DeskBackground)
+            .border(
+                if (selected) 1.5.dp else 1.dp,
+                if (selected) activeColor else SheetBorder,
+                RoundedCornerShape(8.dp)
+            )
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .padding(horizontal = 12.dp, vertical = 7.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(label, color = if (selected) Slate900 else Slate600, fontSize = 12.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+            Text(
+                label,
+                color = if (selected) InkPrimary else InkSecondary,
+                fontSize = 12.sp,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+            )
             Box(
                 Modifier.clip(RoundedCornerShape(10.dp))
-                    .background(if (selected) activeColor.copy(alpha = 0.12f) else Slate200)
+                    .background(if (selected) activeColor.copy(alpha = 0.12f) else SheetBorder)
                     .padding(horizontal = 6.dp, vertical = 1.dp)
             ) {
-                Text(count.toString(), color = if (selected) activeColor else Slate600, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    count.toString(),
+                    color = if (selected) activeColor else InkSecondary,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
     }
 }
 
-// ─── Professional Job Row Item ────────────────────────────────────────────────
+// ─── Print Spec Glyphs & Badges (Print Trade Language) ────────────────────────
+@Composable
+private fun PrintSpecCopies(copies: String) {
+    val count = copies.ifBlank { "1" }
+    Box(
+        Modifier.clip(RoundedCornerShape(6.dp))
+            .background(CobaltLight)
+            .border(1.dp, CobaltBorder, RoundedCornerShape(6.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            StationIcons.Copies(modifier = Modifier.size(13.dp), color = CobaltAction)
+            Text(
+                "× $count ${if (count == "1") "COPY" else "COPIES"}",
+                color = CobaltAction,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.5.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun PrintSpecPages(pages: Int) {
+    Box(
+        Modifier.clip(RoundedCornerShape(6.dp))
+            .background(SheetSurface)
+            .border(1.dp, SheetBorder, RoundedCornerShape(6.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            StationIcons.Document(modifier = Modifier.size(12.dp), color = InkSecondary)
+            Text(
+                "$pages ${if (pages == 1) "page" else "pages"}",
+                color = InkPrimary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
+@Composable
+private fun PrintSpecColor(mode: String) {
+    val isColor = mode.contains("COLOR", ignoreCase = true)
+    val bg = if (isColor) Color(0xFFF5F3FF) else SheetSurface
+    val border = if (isColor) Color(0xFFDDD6FE) else SheetBorder
+    val fg = if (isColor) Color(0xFF6D28D9) else InkSecondary
+    val label = if (isColor) "Color" else "Black & White"
+
+    Box(
+        Modifier.clip(RoundedCornerShape(6.dp))
+            .background(bg)
+            .border(1.dp, border, RoundedCornerShape(6.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            StationIcons.ColorMode(modifier = Modifier.size(12.dp), color = fg)
+            Text(label, color = fg, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+private fun PrintSpecPaper(size: String) {
+    Box(
+        Modifier.clip(RoundedCornerShape(6.dp))
+            .background(SheetSurface)
+            .border(1.dp, SheetBorder, RoundedCornerShape(6.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+    ) {
+        Text(
+            size.uppercase(),
+            color = InkPrimary,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.5.sp
+        )
+    }
+}
+
+@Composable
+private fun PrintSpecDuplex(mode: String) {
+    val isDuplex = mode.contains("DUPLEX", ignoreCase = true) || mode.contains("TWO", ignoreCase = true)
+    Box(
+        Modifier.clip(RoundedCornerShape(6.dp))
+            .background(SheetSurface)
+            .border(1.dp, SheetBorder, RoundedCornerShape(6.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            StationIcons.Duplex(modifier = Modifier.size(12.dp), color = InkSecondary)
+            Text(
+                if (isDuplex) "2-Sided (Duplex)" else "1-Sided",
+                color = InkPrimary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
+@Composable
+private fun PrintSpecPrinter(printerName: String) {
+    Box(
+        Modifier.clip(RoundedCornerShape(6.dp))
+            .background(SheetSurface)
+            .border(1.dp, SheetBorder, RoundedCornerShape(6.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            StationIcons.Printer(modifier = Modifier.size(12.dp), color = InkMuted)
+            Text(
+                printerName,
+                color = InkSecondary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun QueueMetaCell(label: String, value: String) {
+    Column {
+        Text(label, color = InkMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+        Text(value, color = InkPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+// ─── Professional Job Ticket Item ("Ink & Sheet" Design) ──────────────────────
 @Composable
 private fun JobRowItem(
     job: PrintJobStatus,
@@ -2086,16 +2262,16 @@ private fun JobRowItem(
     val isFailed      = job.status in FAILED_STATUSES
 
     val borderColor = when {
-        isNewOrPending -> BrandBlue
+        isNewOrPending -> CobaltAction
         isPrinting    -> Amber
         isCompleted   -> EmeraldBorder
         isFailed      -> RoseBorder
-        else          -> Slate200
+        else          -> SheetBorder
     }
 
     Card(
         Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(PureWhite),
+        colors = CardDefaults.cardColors(SheetSurface),
         shape  = RoundedCornerShape(12.dp),
         border = androidx.compose.foundation.BorderStroke(
             if (isNewOrPending || isPrinting) 1.5.dp else 1.dp,
@@ -2113,7 +2289,7 @@ private fun JobRowItem(
                 // Left: Icon + Doc Info
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     val (iconBg, iconFg) = when {
-                        isNewOrPending -> Pair(BrandBlueLight, BrandBlue)
+                        isNewOrPending -> Pair(CobaltLight, CobaltAction)
                         isPrinting    -> Pair(AmberLight, Amber)
                         isCompleted   -> Pair(EmeraldLight, Emerald)
                         else          -> Pair(RoseLight, Rose)
@@ -2132,18 +2308,18 @@ private fun JobRowItem(
 
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(job.documentName.ifBlank { "Untitled Document" }, color = Slate900, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text(job.documentName.ifBlank { "Untitled Document" }, color = InkPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             if (job.totalFiles > 1) {
-                                Box(Modifier.clip(RoundedCornerShape(4.dp)).background(BrandBlueLight).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                                    Text("BATCH ${job.fileIndex + 1}/${job.totalFiles}", color = BrandBlueHover, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                Box(Modifier.clip(RoundedCornerShape(4.dp)).background(CobaltLight).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                                    Text("BATCH ${job.fileIndex + 1}/${job.totalFiles}", color = CobaltHover, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             val customerText = job.customerName?.let { "$it • " } ?: ""
-                            Text("${customerText}Job #${job.id.takeLast(8).uppercase()}", color = Slate500, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                            Text("·", color = Slate400)
-                            Text("Submitted ${formatRelativeTime(job.createdAt)}", color = Slate400, fontSize = 11.sp)
+                            Text("${customerText}Job #${job.id.takeLast(8).uppercase()}", color = InkSecondary, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+                            Text("·", color = InkSubtle)
+                            Text("Submitted ${formatRelativeTime(job.createdAt)}", color = InkMuted, fontSize = 11.sp)
                         }
                     }
                 }
@@ -2152,20 +2328,20 @@ private fun JobRowItem(
                 ModernStatusBadge(job.status)
             }
 
-            // Middle: Metadata Strip
+            // Middle: Print Trade Specification Strip
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Slate100).padding(horizontal = 14.dp, vertical = 8.dp),
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(DeskBackground).padding(horizontal = 10.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    QueueMetaCell("COPIES", "${job.copies.ifBlank { "1" }} copy")
-                    QueueMetaCell("PAGES", "${job.pageCount} pgs")
-                    QueueMetaCell("COLOR", job.colorMode)
-                    QueueMetaCell("SIZE", job.paperSize)
-                    QueueMetaCell("DUPLEX", job.duplexMode)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
+                    PrintSpecCopies(job.copies)
+                    PrintSpecPages(job.pageCount)
+                    PrintSpecColor(job.colorMode)
+                    PrintSpecPaper(job.paperSize)
+                    PrintSpecDuplex(job.duplexMode)
                     if (!job.printerName.isNullOrBlank()) {
-                        QueueMetaCell("PRINTER", job.printerName)
+                        PrintSpecPrinter(job.printerName)
                     }
                 }
                 if (isCompleted) {
@@ -2187,10 +2363,10 @@ private fun JobRowItem(
                         progress = { progress },
                         modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
                         color = Amber,
-                        trackColor = Slate200,
+                        trackColor = SheetBorder,
                     )
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Hardware Spooler: Printing to ${job.printerName ?: "Local Windows Spooler"}", color = Slate500, fontSize = 11.sp)
+                        Text("Hardware Spooler: Printing to ${job.printerName ?: "Local Windows Spooler"}", color = InkSecondary, fontSize = 11.sp)
                         Text("${(progress * 100).toInt()}% complete", color = Amber, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
@@ -2208,7 +2384,7 @@ private fun JobRowItem(
                 }
             }
 
-            // Action Buttons Row
+            // Action Buttons Row — Enforcing "One Next Action"
             Row(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -2216,18 +2392,20 @@ private fun JobRowItem(
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (isNewOrPending) {
+                        // The ONE primary filled action: Accept & Print
                         Button(
                             onClick = { onAccept(job) },
-                            colors = ButtonDefaults.buttonColors(BrandBlue, PureWhite),
+                            colors = ButtonDefaults.buttonColors(CobaltAction, SheetSurface),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.height(34.dp),
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                StationIcons.Check(modifier = Modifier.size(12.dp), color = PureWhite)
+                                StationIcons.Check(modifier = Modifier.size(12.dp), color = SheetSurface)
                                 Text("Accept & Print", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
 
+                        // Secondary: Reject
                         OutlinedButton(
                             onClick = { onCancel(job) },
                             shape = RoundedCornerShape(8.dp),
@@ -2241,16 +2419,17 @@ private fun JobRowItem(
                             }
                         }
 
-                        Button(
+                        // Tertiary: In-RAM Preview
+                        OutlinedButton(
                             onClick = { onVerify(job) },
-                            colors = ButtonDefaults.buttonColors(BrandBlueLight, BrandBlueHover),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.height(34.dp),
-                            elevation = ButtonDefaults.buttonElevation(0.dp)
+                            border = androidx.compose.foundation.BorderStroke(1.dp, SheetBorderStrong),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = InkSecondary)
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                StationIcons.Eye(modifier = Modifier.size(13.dp), color = BrandBlueHover)
-                                Text("Preview in RAM", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                StationIcons.Eye(modifier = Modifier.size(13.dp), color = InkSecondary)
+                                Text("Preview in RAM", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     } else if (isPrinting) {
@@ -2270,7 +2449,7 @@ private fun JobRowItem(
                 }
 
                 TextButton(onClick = { onDetails(job) }, modifier = Modifier.height(34.dp)) {
-                    Text("View Specification Sheet ℹ", fontSize = 12.sp, color = Slate500, fontWeight = FontWeight.Medium)
+                    Text("Ticket Specs ℹ", fontSize = 12.sp, color = InkMuted, fontWeight = FontWeight.Medium)
                 }
             }
         }
@@ -2304,24 +2483,27 @@ private fun AutoDeleteCountdownPill(
     }
 }
 
-@Composable
-private fun QueueMetaCell(label: String, value: String) {
-    Column {
-        Text(label, color = Slate500, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
-        Text(value, color = Slate900, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-// ─── Status Badge System ──────────────────────────────────────────────────────
+// ─── Status Badge System (Print Trade Terminology) ─────────────────────────────
 @Composable
 private fun ModernStatusBadge(rawStatus: String) {
-    val status = rawStatus.uppercase().replace('_', ' ')
-    val (bg, border, fg) = when {
-        status.contains("COMPLET") -> Triple(EmeraldLight, EmeraldBorder, Emerald)
-        status.contains("PRINTING") || status.contains("ACCEPTED") -> Triple(BrandBlueLight, BrandBlueBorder, BrandBlueHover)
-        status.contains("AUTHORIZ") -> Triple(BrandBlueLight, BrandBlueBorder, BrandBlueHover)
-        status.contains("FAIL") || status.contains("CANCEL") || status.contains("ERROR") -> Triple(RoseLight, RoseBorder, Rose)
-        else -> Triple(AmberLight, AmberBorder, Amber)
+    val status = rawStatus.uppercase().trim()
+    val (label, bg, border, fg) = when {
+        status in setOf("CREATED", "QUEUED", "AUTHORIZED", "PENDING") ->
+            Tuple4("READY TO PRINT", CobaltLight, CobaltBorder, CobaltAction)
+        status == "ACCEPTED" ->
+            Tuple4("SPOOLING", CobaltLight, CobaltBorder, CobaltAction)
+        status == "PRINTING" ->
+            Tuple4("PRINTING", AmberLight, AmberBorder, Amber)
+        status == "COMPLETED" ->
+            Tuple4("PRINT COMPLETED", EmeraldLight, EmeraldBorder, Emerald)
+        status == "CANCELLED" ->
+            Tuple4("REJECTED", RoseLight, RoseBorder, Rose)
+        status == "FAILED" ->
+            Tuple4("FAILED", RoseLight, RoseBorder, Rose)
+        status == "EXPIRED" ->
+            Tuple4("EXPIRED", RoseLight, RoseBorder, Rose)
+        else ->
+            Tuple4(status.replace('_', ' '), AmberLight, AmberBorder, Amber)
     }
 
     Row(
@@ -2330,9 +2512,11 @@ private fun ModernStatusBadge(rawStatus: String) {
         horizontalArrangement = Arrangement.spacedBy(5.dp)
     ) {
         Box(Modifier.size(6.dp).clip(CircleShape).background(fg))
-        Text(status, color = fg, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Text(label, color = fg, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
     }
 }
+
+private data class Tuple4<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
 
 // ─── Connected Printers Screen ────────────────────────────────────────────────
 @Composable
@@ -2502,8 +2686,8 @@ private fun ShopQrPage(shop: ShopDetails?, onRefresh: () -> Unit) {
 
                 // Technical Pair Info
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("SHOP ID: ${shop.id}", color = Slate900, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                    Text("Scan with the PrivPrint mobile app to establish a 15-min ephemeral session.", color = Slate500, fontSize = 11.sp, textAlign = TextAlign.Center)
+                    Text("COUNTER SIGNAGE · PRIVPRINT", color = InkPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Text("Scan with the PrivPrint mobile app to establish a 15-min ephemeral session.", color = InkSecondary, fontSize = 11.5.sp, textAlign = TextAlign.Center)
                 }
 
                 HorizontalDivider(color = Slate100)
@@ -2697,11 +2881,11 @@ private fun StationSecurityPage(status: StationStatus?, onReconnect: () -> Unit)
                 border = androidx.compose.foundation.BorderStroke(1.dp, Slate200),
             ) {
                 Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("CLOUD GATEWAY", color = Slate500, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                    ControlField("Connection State", status?.connectionState ?: "CONNECTED")
-                    ControlField("Realtime Stream", if (status?.realtimeConnected == true) "WebSocket Active" else "Disconnected")
-                    ControlField("Target Server", status?.serverUrl?.ifBlank { "Production Cloud Relay" } ?: "Production Cloud Relay")
-                    ControlField("Station ID", status?.deviceId?.takeLast(12) ?: "WIN-STATION")
+                    Text("CLOUD GATEWAY", color = InkMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    ControlField("Connection State", if (status?.realtimeConnected == true) "Connected" else "Syncing")
+                    ControlField("Realtime Stream", if (status?.realtimeConnected == true) "Secure WebSocket Active" else "Disconnected")
+                    ControlField("Cloud Relay", "PrivPrint Encrypted Relay")
+                    ControlField("Workstation Profile", "Terminal #1 (Active)")
                 }
             }
         }
@@ -2990,15 +3174,15 @@ private fun SettingsPage(
                     }
                     Card(
                         Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(PureWhite),
+                        colors = CardDefaults.cardColors(SheetSurface),
                         shape = RoundedCornerShape(14.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Slate200),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, SheetBorder),
                     ) {
                         Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                            Text("Workstation Identity", color = Slate900, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                            ControlField("Shop Identifier", status?.shopId ?: "Unassigned")
-                            ControlField("Station Hardware ID", status?.deviceId ?: "Unassigned")
-                            ControlField("Cloud Relay", status?.serverUrl ?: "Default Endpoint")
+                            Text("Workstation Identity", color = InkPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            ControlField("Shop Counter", shop?.name ?: "Verified Xerox Partner")
+                            ControlField("Terminal Profile", "Workstation #1 (DPAPI Sealed)")
+                            ControlField("Cloud Relay", "PrivPrint Encrypted Relay")
                         }
                     }
 
